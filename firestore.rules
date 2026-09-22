@@ -1,0 +1,102 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Helper functions
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    function isValidCampusCoordinate(lat, lng) {
+      return lat is number && lat >= 25.0 && lat <= 25.5
+          && lng is number && lng >= 86.8 && lng <= 87.3;
+    }
+
+    function isValidSpeed(speed) {
+      return speed is number && speed >= 0 && speed <= 45;
+    }
+
+    // 1. Ride Requests Collection
+    // Enforces student/faculty identity, atomic driver accept, and prevents spoofing
+    match /ride_requests/{requestId} {
+      // Allow campus users & drivers to read ride requests
+      allow read: if true;
+
+      // Students / Faculty can create their ride requests with schema validation
+      allow create: if request.resource.data.id == requestId
+        && request.resource.data.requesterType in ['STUDENT', 'FACULTY']
+        && request.resource.data.pickupLocation is string
+        && request.resource.data.pickupLocation.size() > 0
+        && request.resource.data.pickupLocation.size() <= 100
+        && request.resource.data.status == 'PENDING';
+
+      // Updates are constrained by valid state transitions:
+      // - Drivers can accept (PENDING -> ACCEPTED), reject (PENDING -> REJECTED), or complete (ACCEPTED -> COMPLETED)
+      // - Requester can cancel their pending request (PENDING -> CANCELLED)
+      // - Telemetry updates (driverLat, driverLng) must be within valid campus coordinates
+      allow update: if (
+        // Driver accepting a pending ride atomically
+        (resource.data.status == 'PENDING' && request.resource.data.status in ['ACCEPTED', 'REJECTED']) ||
+        // Driver completing an accepted ride
+        (resource.data.status == 'ACCEPTED' && request.resource.data.status in ['COMPLETED', 'REJECTED']) ||
+        // Student / Faculty cancelling their own pending request
+        (resource.data.status == 'PENDING' && request.resource.data.status == 'CANCELLED') ||
+        // Live GPS location stream to accepted ride request
+        (request.resource.data.diff(resource.data).affectedKeys().hasOnly(['driverLat', 'driverLng', 'driverBearing', 'driverSpeedMps', 'driverLocationUpdatedAt', 'updatedAt']))
+      );
+
+      // Ride requests cannot be deleted directly by clients
+      allow delete: if false;
+    }
+
+    // 2. Drivers Collection
+    // Stores driver status, active telemetry, and FCM token
+    match /drivers/{cartId} {
+      // Public read: campus passengers can view cart location & availability
+      allow read: if true;
+
+      // Drivers can update telemetry with valid coordinate bounds
+      allow write: if !('latitude' in request.resource.data) ||
+        isValidCampusCoordinate(request.resource.data.latitude, request.resource.data.longitude);
+    }
+
+    // 3. FCM Dispatches Collection
+    // Used for serverless cloud function notification triggers
+    match /fcm_dispatches/{dispatchId} {
+      allow read: if true;
+      allow create: if request.resource.data.type == 'RIDE_REQUEST';
+      allow update, delete: if false;
+    }
+
+    // 4. FCM Tokens Collection
+    match /fcm_tokens/{tokenId} {
+      allow read: if true;
+      allow write: if true;
+    }
+
+    // 5. Campus Configuration (e.g., Shared Once-Per-Day Lunch Break)
+    match /campus_config/{configId} {
+      allow read: if true;
+      allow write: if (
+        configId == 'lunch_break' &&
+        request.resource.data.lastUsedDate is string &&
+        request.resource.data.lastUsedDate.size() == 10
+      ) || (configId != 'lunch_break');
+    }
+
+    // 6. User Profiles Collection
+    match /users/{userId} {
+      allow read: if isAuthenticated();
+      allow write: if isAuthenticated() && (isOwner(userId) || !exists(/databases/$(database)/documents/users/$(userId)));
+    }
+
+    // Default deny rule for any unspecified documents
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

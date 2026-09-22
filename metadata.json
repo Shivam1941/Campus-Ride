@@ -1,0 +1,6 @@
+{
+  "name": "Campus Ride",
+  "description": "Smart transportation app for IIIT Bhagalpur with live golf cart tracking, geofenced driver request, and role management.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
