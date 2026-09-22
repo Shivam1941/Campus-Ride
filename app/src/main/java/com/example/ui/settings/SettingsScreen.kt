@@ -229,7 +229,7 @@ fun SettingsScreen(
                                 Spacer(modifier = Modifier.width(6.dp))
                                 Column {
                                     Text(
-                                        text = "Cart 1",
+                                        text = "Driver 1 (Cart 1)",
                                         fontWeight = FontWeight.Bold,
                                         fontSize = 13.sp,
                                         color = Color(0xFF14532D)
@@ -265,7 +265,7 @@ fun SettingsScreen(
                                 Spacer(modifier = Modifier.width(6.dp))
                                 Column {
                                     Text(
-                                        text = "Cart 2",
+                                        text = "Driver 2 (Cart 2)",
                                         fontWeight = FontWeight.Bold,
                                         fontSize = 13.sp,
                                         color = Color(0xFF1E3A8A)

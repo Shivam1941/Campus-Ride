@@ -1227,8 +1227,8 @@ fun CampusHelplineContent(
         Spacer(modifier = Modifier.height(18.dp))
 
         HelplineContactCard(
-            title = "Cart 1 (Fixed Phone)",
-            subtitle = "Direct in-cart phone for Cart 1",
+            title = "Driver 1 / Cart 1 (Shivam)",
+            subtitle = "Direct contact for Driver 1 / Cart 1",
             phoneNumber = CampusCartConfig.CART_1_PHONE,
             displayNumber = CampusCartConfig.getCartDisplayNumber("cart_1"),
             icon = Icons.Default.PhoneInTalk,
@@ -1239,8 +1239,8 @@ fun CampusHelplineContent(
         Spacer(modifier = Modifier.height(10.dp))
 
         HelplineContactCard(
-            title = "Cart 2 (Fixed Phone)",
-            subtitle = "Direct in-cart phone for Cart 2",
+            title = "Driver 2 / Cart 2 (Kartik)",
+            subtitle = "Direct contact for Driver 2 / Cart 2",
             phoneNumber = CampusCartConfig.CART_2_PHONE,
             displayNumber = CampusCartConfig.getCartDisplayNumber("cart_2"),
             icon = Icons.Default.PhoneInTalk,

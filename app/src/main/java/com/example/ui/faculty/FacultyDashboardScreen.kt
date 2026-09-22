@@ -584,7 +584,7 @@ fun FacultyDashboardScreen(
                             Spacer(modifier = Modifier.width(12.dp))
                             Column(modifier = Modifier.weight(1f)) {
                                 Text(
-                                    text = "Cart 1 (Fixed Phone)",
+                                    text = "Driver 1 / Cart 1 (Shivam)",
                                     fontWeight = FontWeight.Bold,
                                     fontSize = 14.sp,
                                     color = Color(0xFF166534)
@@ -628,7 +628,7 @@ fun FacultyDashboardScreen(
                             Spacer(modifier = Modifier.width(12.dp))
                             Column(modifier = Modifier.weight(1f)) {
                                 Text(
-                                    text = "Cart 2 (Fixed Phone)",
+                                    text = "Driver 2 / Cart 2 (Kartik)",
                                     fontWeight = FontWeight.Bold,
                                     fontSize = 14.sp,
                                     color = Color(0xFF1E3A8A)

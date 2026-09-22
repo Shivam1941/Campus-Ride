@@ -1,6 +1,7 @@
 package com.example.ui.driver
 
 import android.widget.Toast
+import com.example.data.model.CampusCartConfig
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -560,8 +561,9 @@ fun DriverDashboardScreen(
                                                         )
                                                     }
                                                 }
+                                                val driverPhoneDisplay = if (isCart2) CampusCartConfig.getCartDisplayNumber("cart_2") else CampusCartConfig.getCartDisplayNumber("cart_1")
                                                 Text(
-                                                    text = "Driver: ${driverName.ifBlank { if (isCart2) "Kartik" else "Shivam" }} • Manual cart switching disabled",
+                                                    text = "Driver: ${driverName.ifBlank { if (isCart2) "Kartik" else "Shivam" }} ($driverPhoneDisplay)",
                                                     fontSize = 11.5.sp,
                                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                                 )
