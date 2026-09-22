@@ -24,10 +24,10 @@ object CampusCartConfig {
                 if (!configured.isNullOrBlank() && !configured.contains("PLACEHOLDER", ignoreCase = true)) {
                     configured.trim()
                 } else {
-                    "+919876543210"
+                    "+919336794056"
                 }
             } catch (_: Throwable) {
-                "+919876543210"
+                "+919336794056"
             }
         }
 

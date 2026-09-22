@@ -22,6 +22,7 @@ android {
 
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     manifestPlaceholders["MAPS_API_KEY"] = (project.findProperty("MAPS_API_KEY") as? String) ?: ""
+    buildConfigField("String", "CART_1_PHONE_NUMBER", "\"9336794056\"")
   }
 
   signingConfigs {
