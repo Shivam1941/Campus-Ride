@@ -10,6 +10,7 @@ import android.media.AudioManager
 import android.net.Uri
 import android.os.Build
 import android.provider.Settings
+import android.util.Log
 import com.example.notification.CriticalAlertManager
 import com.example.data.model.UserRole
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -231,21 +232,46 @@ object PermissionUtils {
 
     fun requestIgnoreBatteryOptimizations(context: Context) {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            // 1. Direct system 1-tap dialog (requires REQUEST_IGNORE_BATTERY_OPTIMIZATIONS in manifest)
             try {
                 val intent = Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS).apply {
                     data = Uri.parse("package:${context.packageName}")
                     flags = Intent.FLAG_ACTIVITY_NEW_TASK
                 }
                 context.startActivity(intent)
+                return
             } catch (e: Exception) {
-                try {
-                    val intent = Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS).apply {
-                        flags = Intent.FLAG_ACTIVITY_NEW_TASK
-                    }
-                    context.startActivity(intent)
-                } catch (ex: Exception) {
-                    openAppSettings(context)
+                Log.w("PermissionUtils", "Direct ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS failed: ${e.message}")
+            }
+
+            // 2. Direct App Battery Usage page (Android 12/13/14/15)
+            try {
+                val intent = Intent("android.settings.APP_BATTERY_USAGE_SETTINGS").apply {
+                    data = Uri.parse("package:${context.packageName}")
+                    flags = Intent.FLAG_ACTIVITY_NEW_TASK
                 }
+                context.startActivity(intent)
+                return
+            } catch (_: Exception) {}
+
+            // 3. Application Details Settings (App Info)
+            try {
+                val intent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
+                    data = Uri.parse("package:${context.packageName}")
+                    flags = Intent.FLAG_ACTIVITY_NEW_TASK
+                }
+                context.startActivity(intent)
+                return
+            } catch (_: Exception) {}
+
+            // 4. Fallback to system battery optimization list
+            try {
+                val intent = Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS).apply {
+                    flags = Intent.FLAG_ACTIVITY_NEW_TASK
+                }
+                context.startActivity(intent)
+            } catch (ex: Exception) {
+                openAppSettings(context)
             }
         }
     }

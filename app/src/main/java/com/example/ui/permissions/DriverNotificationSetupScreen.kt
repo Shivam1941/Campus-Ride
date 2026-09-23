@@ -147,7 +147,8 @@ fun DriverNotificationSetupScreen(
     val batteryReady = isBatteryOptIgnored && isBackgroundOpAvailable
     val soundReady = isRingerNormal
 
-    val allRequirementsMet = trackingReady && notifReady && isFcmRegistered && batteryReady && soundReady
+    val coreRequirementsMet = trackingReady && notifReady && isFcmRegistered && soundReady
+    val allRequirementsMet = coreRequirementsMet && batteryReady
 
     // Calculate completed count
     val checkList = listOf(
@@ -453,26 +454,31 @@ fun DriverNotificationSetupScreen(
                         Text("Check Again", fontSize = 13.sp, fontWeight = FontWeight.Bold)
                     }
 
+                    val canProceed = allRequirementsMet || coreRequirementsMet
                     Button(
                         onClick = {
                             refreshAllStatuses()
-                            if (allRequirementsMet) {
+                            if (allRequirementsMet || coreRequirementsMet) {
                                 onContinue()
                             }
                         },
-                        enabled = allRequirementsMet,
+                        enabled = canProceed,
                         modifier = Modifier
                             .weight(1.5f)
                             .height(50.dp),
                         shape = RoundedCornerShape(12.dp),
                         colors = ButtonDefaults.buttonColors(
-                            containerColor = Color(0xFF16A34A),
+                            containerColor = if (allRequirementsMet) Color(0xFF16A34A) else Color(0xFF2563EB),
                             disabledContainerColor = MaterialTheme.colorScheme.surfaceVariant,
                             disabledContentColor = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
                         )
                     ) {
                         Text(
-                            text = if (allRequirementsMet) "CONTINUE TO DASHBOARD ✓" else "Gate Locked ($completedCount/$totalCount)",
+                            text = when {
+                                allRequirementsMet -> "CONTINUE TO DASHBOARD ✓"
+                                coreRequirementsMet -> "CONTINUE TO DASHBOARD (6/7)"
+                                else -> "Gate Locked ($completedCount/$totalCount)"
+                            },
                             fontSize = 12.sp,
                             fontWeight = FontWeight.ExtraBold
                         )
@@ -482,9 +488,13 @@ fun DriverNotificationSetupScreen(
                 if (!allRequirementsMet) {
                     Spacer(modifier = Modifier.height(6.dp))
                     Text(
-                        text = "🔒 Hard Permission Gate: Driver cannot access Dashboard until all requirements are verified.",
+                        text = if (coreRequirementsMet) {
+                            "⚡ Foreground GPS active. Background battery exemption recommended for screen-off tracking."
+                        } else {
+                            "🔒 Hard Permission Gate: Driver cannot access Dashboard until all requirements are verified."
+                        },
                         fontSize = 11.sp,
-                        color = Color(0xFFDC2626),
+                        color = if (coreRequirementsMet) Color(0xFFD97706) else Color(0xFFDC2626),
                         fontWeight = FontWeight.SemiBold,
                         textAlign = TextAlign.Center,
                         modifier = Modifier.fillMaxWidth()
