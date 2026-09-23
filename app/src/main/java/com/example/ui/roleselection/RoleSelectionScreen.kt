@@ -78,16 +78,16 @@ fun RoleSelectionScreen(
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center
     ) {
-        // Tesseract Dynamics Sacred Geometry Brand Emblem
+        // Brand Logo Emblem
         Box(
             modifier = Modifier
                 .size(80.dp)
                 .clip(CircleShape)
-                .background(Color.White)
+                .background(Color(0xFF050A14))
                 .border(
-                    width = 1.5.dp,
+                    width = 2.dp,
                     brush = Brush.linearGradient(
-                        colors = listOf(Color(0xFFD4AF37), Color(0xFFAA8C2C), Color(0xFFE5C158))
+                        colors = listOf(Color(0xFF00D2FF), Color(0xFF0284C7), Color(0xFF38BDF8))
                     ),
                     shape = CircleShape
                 ),
@@ -95,7 +95,7 @@ fun RoleSelectionScreen(
         ) {
             Image(
                 painter = painterResource(id = com.example.R.drawable.img_tesseract_icon),
-                contentDescription = "Tesseract Dynamics Emblem",
+                contentDescription = "Campus Ride Logo",
                 modifier = Modifier
                     .size(76.dp)
                     .clip(CircleShape),

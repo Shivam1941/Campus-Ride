@@ -484,7 +484,7 @@ fun SplashScreen(
                     .alpha(logoAlpha.value),
                 contentAlignment = Alignment.Center
             ) {
-                // Outer gold specular ring
+                // Outer cyan/electric blue specular ring
                 Box(
                     modifier = Modifier
                         .size(92.dp)
@@ -492,30 +492,30 @@ fun SplashScreen(
                         .background(
                             Brush.sweepGradient(
                                 listOf(
-                                    Color(0xFFE5C158),
-                                    Color(0xFFD4AF37),
-                                    Color(0xFF8A6C1B),
-                                    Color(0xFFFDE68A),
-                                    Color(0xFFD4AF37),
-                                    Color(0xFFE5C158)
+                                    Color(0xFF38BDF8),
+                                    Color(0xFF00D2FF),
+                                    Color(0xFF0284C7),
+                                    Color(0xFF0EA5E9),
+                                    Color(0xFF0072FF),
+                                    Color(0xFF38BDF8)
                                 )
                             )
                         )
-                        .padding(2.5.dp)
+                        .padding(2.dp)
                 ) {
                     // Deep dark glass core container
                     Box(
                         modifier = Modifier
                             .fillMaxSize()
                             .clip(CircleShape)
-                            .background(Color(0xFF060B18)),
+                            .background(Color(0xFF000000)),
                         contentAlignment = Alignment.Center
                     ) {
                         Image(
                             painter = painterResource(id = com.example.R.drawable.img_tesseract_icon),
-                            contentDescription = "Tesseract Dynamics Emblem",
+                            contentDescription = "Campus Ride Logo",
                             modifier = Modifier
-                                .size(84.dp)
+                                .size(88.dp)
                                 .clip(CircleShape),
                             contentScale = ContentScale.Crop
                         )
