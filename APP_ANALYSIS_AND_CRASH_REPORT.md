@@ -28,8 +28,8 @@
 **Campus Ride** is an Android application built for **IIIT Bhagalpur** to provide real-time tracking, on-demand dispatching, and geofence monitoring for electric golf carts servicing students, faculty, and campus staff.
 
 The system manages two permanent carts:
-- **Cart 1**: Driven by Shivam (Dedicated In-Cart Mobile: `+91-9876543210`)
-- **Cart 2**: Driven by Kartik (Dedicated In-Cart Mobile: `+91-9876543211`)
+- **Cart 1**: Driven by Shivam (Dedicated In-Cart Mobile: `+91-9572494687`)
+- **Cart 2**: Driven by Kartik (Dedicated In-Cart Mobile: `+91-9336794056`)
 
 The active fixed route runs across key landmarks:
 $$\text{Main Gate} \longleftrightarrow \text{Trunket} \longleftrightarrow \text{Computer Centre} \longleftrightarrow \text{Hostel (Boys Hostel)}$$

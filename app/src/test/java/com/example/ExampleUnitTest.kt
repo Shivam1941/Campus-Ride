@@ -370,4 +370,19 @@ class ExampleUnitTest {
         assertTrue(com.example.location.GeofenceManager.isWithinGeofence(gateLat, gateLng))
         assertFalse(com.example.location.GeofenceManager.isWithinGeofence(hostelLat, hostelLng))
     }
+
+    @Test
+    fun testCampusCartConfig_DriverPhoneNumbers() {
+        // Driver 1 (Cart 1): 9572494687
+        val cart1Phone = com.example.data.model.CampusCartConfig.getCartPhoneNumber("cart_1")
+        assertEquals("+919572494687", cart1Phone)
+        val cart1Display = com.example.data.model.CampusCartConfig.getCartDisplayNumber("cart_1")
+        assertEquals("+91 95724 94687", cart1Display)
+
+        // Driver 2 (Cart 2): 9336794056
+        val cart2Phone = com.example.data.model.CampusCartConfig.getCartPhoneNumber("cart_2")
+        assertEquals("+919336794056", cart2Phone)
+        val cart2Display = com.example.data.model.CampusCartConfig.getCartDisplayNumber("cart_2")
+        assertEquals("+91 93367 94056", cart2Display)
+    }
 }

@@ -24,10 +24,10 @@ object CampusCartConfig {
                 if (!configured.isNullOrBlank() && !configured.contains("PLACEHOLDER", ignoreCase = true)) {
                     configured.trim()
                 } else {
-                    "+919336794056"
+                    "+919572494687"
                 }
             } catch (_: Throwable) {
-                "+919336794056"
+                "+919572494687"
             }
         }
 
@@ -41,10 +41,10 @@ object CampusCartConfig {
                 if (!configured.isNullOrBlank() && !configured.contains("PLACEHOLDER", ignoreCase = true)) {
                     configured.trim()
                 } else {
-                    "+919876543211"
+                    "+919336794056"
                 }
             } catch (_: Throwable) {
-                "+919876543211"
+                "+919336794056"
             }
         }
 
