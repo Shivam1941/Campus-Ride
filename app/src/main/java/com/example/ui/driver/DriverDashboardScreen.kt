@@ -126,13 +126,15 @@ fun DriverDashboardScreen(
     val cart2State by repository.cart2State.collectAsState()
     val activeCartState = if (selectedCartId == "cart_1") cart1State else cart2State
 
-    val cartState by repository.golfCartState.collectAsState()
     val requests by repository.requests.collectAsState()
     val overrideHours by repository.overrideWorkingHours.collectAsState()
-    val schedule = com.example.data.model.ScheduleStatus.getCurrentStatus(overrideHours)
-    val criticalAlertRequest by com.example.notification.CriticalAlertManager.activeAlertRequest.collectAsState()
-
     val driverDutyState by repository.driverDutyState.collectAsState()
+    val effectiveDutyStatus by repository.effectiveDutyStatus.collectAsState()
+    val schedule = com.example.data.model.ScheduleStatus.getCurrentStatus(
+        overrideHours = overrideHours,
+        isDriverAvailable = (effectiveDutyStatus == "ON_DUTY" || driverDutyState == "Available")
+    )
+    val criticalAlertRequest by com.example.notification.CriticalAlertManager.activeAlertRequest.collectAsState()
     val driverName by repository.driverName.collectAsState()
     val driverCartLocked by repository.driverCartLocked.collectAsState()
     val manualDutyOverride by repository.manualDutyOverride.collectAsState()
@@ -673,7 +675,7 @@ fun DriverDashboardScreen(
                             }
                         } else {
                             // Working Schedule Status Card (Authoritative Automatic Duty)
-                            val isEffectivelyOnDuty = !manualDutyOverride && isInsideCampus && schedule.dutyState == com.example.data.model.ScheduleDutyState.ON_DUTY
+                            val isEffectivelyOnDuty = !manualDutyOverride && (effectiveDutyStatus == "ON_DUTY" || driverDutyState == "Available" || (isInsideCampus && schedule.dutyState == com.example.data.model.ScheduleDutyState.ON_DUTY))
                             val (cardBg, iconBg, statusColor) = when {
                                 manualDutyOverride -> Triple(Color(0xFFFEF2F2), Color(0xFFDC2626), Color(0xFF991B1B))
                                 isEffectivelyOnDuty -> Triple(Color(0xFFF0FDF4), Color(0xFF16A34A), Color(0xFF15803D))
@@ -719,8 +721,11 @@ fun DriverDashboardScreen(
                                                 Text(
                                                     text = when {
                                                         manualDutyOverride -> "Off Duty"
+                                                        isOnLunchBreak -> "Lunch Break"
                                                         isEffectivelyOnDuty -> "On Duty"
-                                                        else -> "Driver Not Available"
+                                                        !hasGpsLocation -> "Acquiring GPS..."
+                                                        !isInsideCampus -> "Driver Not Available"
+                                                        else -> "On Duty"
                                                     },
                                                     fontWeight = FontWeight.Bold,
                                                     fontSize = 16.sp,
@@ -730,8 +735,11 @@ fun DriverDashboardScreen(
                                                 Text(
                                                     text = when {
                                                         manualDutyOverride -> "Manual off duty active"
-                                                        isEffectivelyOnDuty -> "Inside IIIT Bhagalpur"
-                                                        else -> "Outside campus boundary • Driver not available"
+                                                        isOnLunchBreak -> "Lunch break in progress"
+                                                        isEffectivelyOnDuty -> "Inside IIIT Bhagalpur • Live broadcasting"
+                                                        !hasGpsLocation -> "Acquiring satellite fix..."
+                                                        !isInsideCampus -> "Outside campus boundary • Driver not available"
+                                                        else -> "Operating on Campus"
                                                     },
                                                     fontSize = 12.sp,
                                                     fontWeight = FontWeight.Medium,

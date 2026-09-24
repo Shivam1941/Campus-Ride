@@ -81,7 +81,7 @@ object TrackingConfig {
         const val MIN_UPDATE_DISTANCE_M = 5.0                // send location to server if moved >= 5m
         const val HEADING_CHANGE_THRESHOLD_DEG = 25f         // send if turn >= 25 deg at speed
         const val MAX_HEARTBEAT_INTERVAL_MS = 35_000L        // keep-alive heartbeat threshold
-        const val STALE_LOCATION_THRESHOLD_MS = 45_000L      // UI treats > 45s as stale
+        const val STALE_LOCATION_THRESHOLD_MS = 90_000L      // UI treats > 90s as stale (allows 2-3 stationary GPS cycles)
 
         // Exponential backoff configuration
         const val BACKOFF_INITIAL_MS = 5_000L

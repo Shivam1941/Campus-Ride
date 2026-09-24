@@ -42,56 +42,69 @@ data class GolfCartState(
     val activeRequestId: String? = null,
     val direction: String? = null, // e.g. "Trunkut → Main Gate", "Computer Centre → Hostel"
     val currentStop: String? = null, // e.g. "Trunkut", "Main Gate", "Near Computer Centre"
-    val nextStop: String? = null // e.g. "Main Gate", "Computer Centre", "Hostel"
+    val nextStop: String? = null, // e.g. "Main Gate", "Computer Centre", "Hostel"
+    val localReceiptTimestampMillis: Long = System.currentTimeMillis()
 ) {
     companion object {
         const val HEARTBEAT_INTERVAL_MS = 25_000L
-        const val HEARTBEAT_EXPIRATION_MS = 60_000L
-        const val LOCATION_STALE_THRESHOLD_MS = 45_000L
-        const val LOCATION_EXPIRED_THRESHOLD_MS = 120_000L
+        const val HEARTBEAT_EXPIRATION_MS = 120_000L       // 120s (allows 3-4 missed stationary heartbeat cycles)
+        const val LOCATION_STALE_THRESHOLD_MS = 90_000L     // 90s (allows 2-3 missed stationary GPS cycles)
+        const val LOCATION_EXPIRED_THRESHOLD_MS = 180_000L  // 180s (3 minutes)
     }
 
     val landmarkZone: String
         get() = com.example.location.CampusLandmarkZone.getCartLocationDescription(latitude, longitude)
 
+    val localReceiptAgeMs: Long
+        get() = (System.currentTimeMillis() - localReceiptTimestampMillis).coerceAtLeast(0L)
+
     val heartbeatAgeMs: Long
-        get() = lastHeartbeatMillis?.let { kotlin.math.abs(System.currentTimeMillis() - it) }
-            ?: lastUpdatedMillis?.let { kotlin.math.abs(System.currentTimeMillis() - it) }
-            ?: Long.MAX_VALUE
+        get() {
+            val ts = lastHeartbeatMillis ?: lastUpdatedMillis ?: return Long.MAX_VALUE
+            val now = System.currentTimeMillis()
+            val rawAge = if (now >= ts) now - ts else 0L
+            return maxOf(rawAge, localReceiptAgeMs)
+        }
 
     val locationAgeMs: Long
-        get() = locationTimestampMillis?.let { kotlin.math.abs(System.currentTimeMillis() - it) }
-            ?: lastUpdatedMillis?.let { kotlin.math.abs(System.currentTimeMillis() - it) }
-            ?: Long.MAX_VALUE
+        get() {
+            val ts = locationTimestampMillis ?: lastUpdatedMillis ?: return Long.MAX_VALUE
+            val now = System.currentTimeMillis()
+            val rawAge = if (now >= ts) now - ts else 0L
+            return maxOf(rawAge, localReceiptAgeMs)
+        }
 
     val hasCoordinates: Boolean
         get() = latitude != null && longitude != null && latitude != 0.0 && longitude != 0.0
 
     val isInsideCampus: Boolean
         get() {
+            if (hasCoordinates) {
+                return com.example.location.GeofenceManager.isInsideCampusGeofence(latitude!!, longitude!!)
+            }
             if (driverStatus.equals("Outside Campus", ignoreCase = true)) return false
-            if (driverStatus.equals("Driver Not Available", ignoreCase = true)) return false
-            if (!hasCoordinates) return true
-            return com.example.location.GeofenceManager.isInsideCampusGeofence(latitude!!, longitude!!)
+            return true
         }
 
     val isOutsideCampus: Boolean
-        get() = !isInsideCampus || driverStatus.equals("Outside Campus", ignoreCase = true) || driverStatus.equals("Driver Not Available", ignoreCase = true)
+        get() = !isInsideCampus
 
     val isDriverOnline: Boolean
         get() {
             if (driverStatus.equals("Offline", ignoreCase = true)) return false
             if (driverStatus.equals("Off Duty", ignoreCase = true)) return false
-            if (driverStatus.equals("Outside Campus", ignoreCase = true)) return false
-            if (driverStatus.equals("Driver Not Available", ignoreCase = true)) return false
             if (hasCoordinates && !isInsideCampus) return false
 
             // Explicitly available or active trip indicates driver is online
             if (isAvailable || isTripActive) return true
-            if (driverStatus.equals("Available", ignoreCase = true) || driverStatus.equals("On Trip", ignoreCase = true)) return true
+            if (driverStatus.equals("Available", ignoreCase = true) ||
+                driverStatus.equals("On Trip", ignoreCase = true) ||
+                driverStatus.equals("On Duty", ignoreCase = true)) return true
 
             // If status is OFFLINE and not explicitly available/on-trip
-            if (status == GolfCartStatus.OFFLINE) return false
+            if (status == GolfCartStatus.OFFLINE && !isAvailable) {
+                return heartbeatAgeMs < HEARTBEAT_EXPIRATION_MS
+            }
 
             // Active heartbeat within threshold or moving/halted status
             return heartbeatAgeMs < HEARTBEAT_EXPIRATION_MS
@@ -146,7 +159,8 @@ data class GolfCartState(
     val lastUpdatedFormatted: String
         get() {
             val updateTime = locationTimestampMillis ?: lastUpdatedMillis ?: return "No GPS signal"
-            val diffSec = (System.currentTimeMillis() - updateTime) / 1000
+            val now = System.currentTimeMillis()
+            val diffSec = if (now >= updateTime) (now - updateTime) / 1000 else (localReceiptAgeMs / 1000)
             return when {
                 diffSec < 5 -> "Updated just now"
                 diffSec < 60 -> "Updated ${diffSec}s ago"

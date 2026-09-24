@@ -307,7 +307,7 @@ class CampusRideRepository(context: Context) {
 
     // Authoritative Effective Duty Status (ON_DUTY, OFF_DUTY, LUNCH_BREAK, OUTSIDE_CAMPUS, ON_TRIP)
     private val _effectiveDutyStatus = MutableStateFlow(
-        prefs.getString("pref_effective_duty_status", "OUTSIDE_CAMPUS") ?: "OUTSIDE_CAMPUS"
+        prefs.getString("pref_effective_duty_status", "ON_DUTY") ?: "ON_DUTY"
     )
     val effectiveDutyStatus: StateFlow<String> = _effectiveDutyStatus.asStateFlow()
 
@@ -850,8 +850,9 @@ class CampusRideRepository(context: Context) {
                     return@withContext true
                 } else {
                     if (_driverDutyState.value != "Lunch Break") {
+                        val hasLocation = _hasGpsLocation.value
                         val isInside = _isInsideGeofence.value || _isInsideCampus.value
-                        if (isInside) {
+                        if (isInside || !hasLocation) {
                             _driverDutyState.value = "Available"
                             _effectiveDutyStatus.value = "ON_DUTY"
                             _isDriverAvailable.value = true
@@ -897,8 +898,9 @@ class CampusRideRepository(context: Context) {
             _fleetCarts.value = listOf(_cart1State.value, _cart2State.value)
             _golfCartState.value = updated
         } else {
+            val hasLocation = _hasGpsLocation.value
             val isInside = _isInsideCampus.value || _isInsideGeofence.value
-            if (isInside && _driverDutyState.value != "Lunch Break") {
+            if ((isInside || !hasLocation) && _driverDutyState.value != "Lunch Break") {
                 _driverDutyState.value = "Available"
                 _effectiveDutyStatus.value = "ON_DUTY"
                 _isDriverAvailable.value = true
@@ -928,7 +930,7 @@ class CampusRideRepository(context: Context) {
             try {
                 ensureFirebaseAuth()
                 val firestore = FirebaseFirestore.getInstance()
-                val isAvailable = !isOffDuty && (_isInsideCampus.value || _isInsideGeofence.value)
+                val isAvailable = !isOffDuty && (_isInsideCampus.value || _isInsideGeofence.value || !_hasGpsLocation.value)
                 val statusStr = if (isOffDuty) "Offline" else if (isAvailable) "Available" else "Outside Campus"
                 val cartStatus = if (isOffDuty || !isAvailable) GolfCartStatus.OFFLINE.name else GolfCartStatus.HALTED.name
 
@@ -1273,7 +1275,7 @@ class CampusRideRepository(context: Context) {
                             "cartName" to (if (activeCartId == "cart_1") "Cart 1" else "Cart 2"),
                             "isOnline" to isOnline,
                             "onDuty" to isDutyAvailable,
-                            "insideCampus" to isInside,
+                            "insideCampus" to (if (hasGps) isInside else true),
                             "isBusy" to isBusy,
                             "isAvailable" to effectiveAvailable,
                             "sessionId" to _driverSessionId.value,
@@ -1619,20 +1621,22 @@ class CampusRideRepository(context: Context) {
         val manualOnDuty = (_driverDutyState.value == "Available")
         val activeAcceptedReq = _requests.value.find { it.status == RideRequestStatus.ACCEPTED }
         val isOccupied = activeAcceptedReq != null || _driverDutyState.value == "Occupied" || _driverDutyState.value == "On Trip"
+        val hasLocation = _hasGpsLocation.value
         val isInside = _isInsideGeofence.value || _isInsideCampus.value
 
-        // Driver is available if: On Duty ("Available") AND inside campus (or GPS initializing) AND not occupied
-        val effectiveAvailable = manualOnDuty && (!_hasGpsLocation.value || isInside) && !isOccupied && isInside
+        // Driver is available if: On Duty ("Available") AND (inside campus OR GPS initializing) AND not occupied
+        val isLocationValidForDuty = if (hasLocation) isInside else true
+        val effectiveAvailable = manualOnDuty && isLocationValidForDuty && !isOccupied
 
         _isDriverAvailable.value = effectiveAvailable
         val displayStatus = when {
             _driverDutyState.value == "Lunch Break" -> "Lunch Break"
             _driverDutyState.value == "Off Duty" -> "Offline"
             isOccupied -> "On Trip"
-            !isInside && _hasGpsLocation.value -> "Driver Not Available"
-            _driverDutyState.value == "Outside Campus" || _driverDutyState.value == "Driver Not Available" -> "Driver Not Available"
+            !isInside && hasLocation -> "Driver Not Available"
+            _driverDutyState.value == "Outside Campus" -> if (hasLocation && !isInside) "Driver Not Available" else "Available"
             effectiveAvailable -> "Available"
-            else -> "Driver Not Available"
+            else -> "Available"
         }
         val activeCartId = _selectedDriverCartId.value
         _golfCartState.value = _golfCartState.value?.copy(
@@ -1677,7 +1681,7 @@ class CampusRideRepository(context: Context) {
                             "onDuty" to manualOnDuty,
                             "isOnline" to true,
                             "isBusy" to isOccupied,
-                            "insideCampus" to _isInsideGeofence.value,
+                            "insideCampus" to (if (_hasGpsLocation.value) _isInsideGeofence.value else true),
                             "driverStatus" to displayStatus,
                             "latitude" to (_driverLatitude.value ?: GeofenceManager.LIBRARY_LAT),
                             "longitude" to (_driverLongitude.value ?: GeofenceManager.LIBRARY_LNG),
@@ -1893,6 +1897,23 @@ class CampusRideRepository(context: Context) {
                     fun handleCartSnapshot(cartId: String, snapshot: com.google.firebase.firestore.DocumentSnapshot?) {
                         if (snapshot == null || !snapshot.exists()) return
 
+                        val existingCart = if (cartId == "cart_1") _cart1State.value else _cart2State.value
+
+                        val incomingUpdated = snapshot.safeLong("lastUpdatedMillis", snapshot.safeLong("last_seen", 0L))
+                        val incomingLocationTs = snapshot.safeLong("locationTimestampMillis", 0L)
+                        val incomingBestTs = maxOf(incomingUpdated, incomingLocationTs)
+
+                        val existingBestTs = maxOf(
+                            existingCart.lastUpdatedMillis ?: 0L,
+                            existingCart.locationTimestampMillis ?: 0L
+                        )
+
+                        // Monotonic update check: Ignore out-of-order snapshots from stale disk cache
+                        if (incomingBestTs > 0L && existingBestTs > 0L && incomingBestTs < existingBestTs) {
+                            Log.d("CampusRideRepo", "Ignoring out-of-order/stale snapshot for $cartId (incoming=$incomingBestTs < existing=$existingBestTs)")
+                            return
+                        }
+
                         val lat = snapshot.safeDouble("latitude")
                         val lng = snapshot.safeDouble("longitude")
                         val bearing = snapshot.safeFloat("bearing", 0f)
@@ -1903,9 +1924,11 @@ class CampusRideRepository(context: Context) {
                         val isTripActive = snapshot.getBoolean("isTripActive") ?: false
                         val driverStatus = snapshot.getString("driverStatus") ?: "Available"
 
-                        val isOutside = (lat != null && lng != null && !GeofenceManager.isInsideCampusGeofence(lat, lng)) ||
-                                        driverStatus.equals("Outside Campus", ignoreCase = true) ||
-                                        driverStatus.equals("Driver Not Available", ignoreCase = true)
+                        // Physical Campus Geofence Evaluation:
+                        // Coordinates decide physical boundary. driverStatus only used as fallback if coords missing.
+                        val hasCoords = (lat != null && lng != null && lat != 0.0 && lng != 0.0)
+                        val isPhysicallyInside = if (hasCoords) GeofenceManager.isInsideCampusGeofence(lat!!, lng!!) else true
+                        val isOutside = if (hasCoords) !isPhysicallyInside else driverStatus.equals("Outside Campus", ignoreCase = true)
 
                         var effectiveIsAvailable = isAvailable
                         var effectiveDriverStatus = driverStatus
@@ -1913,13 +1936,14 @@ class CampusRideRepository(context: Context) {
                             effectiveIsAvailable = false
                             effectiveDriverStatus = "Driver Not Available"
                             status = GolfCartStatus.OFFLINE
-                        } else if (status == GolfCartStatus.OFFLINE && (effectiveIsAvailable || effectiveDriverStatus.equals("Available", ignoreCase = true) || effectiveDriverStatus.equals("On Trip", ignoreCase = true))) {
+                        } else if (status == GolfCartStatus.OFFLINE && (effectiveIsAvailable || effectiveDriverStatus.equals("Available", ignoreCase = true) || effectiveDriverStatus.equals("On Trip", ignoreCase = true) || effectiveDriverStatus.equals("On Duty", ignoreCase = true))) {
                             status = if (speedKmH > 0) GolfCartStatus.MOVING else GolfCartStatus.HALTED
                         }
 
-                        val lastUpdated = snapshot.safeLong("lastUpdatedMillis", snapshot.safeLong("last_seen", System.currentTimeMillis()))
+                        val now = System.currentTimeMillis()
+                        val lastUpdated = if (incomingUpdated > 0L) incomingUpdated else now
                         val lastHeartbeat = snapshot.safeLong("lastHeartbeatMillis", snapshot.safeLong("last_seen", lastUpdated))
-                        val locationTimestamp = snapshot.safeLong("locationTimestampMillis", if (lat != null && lng != null) lastUpdated else 0L).let { if (it > 0L) it else null }
+                        val locationTimestamp = if (incomingLocationTs > 0L) incomingLocationTs else if (lat != null && lng != null) lastUpdated else null
                         val direction = snapshot.getString("direction")
                         val currentStop = snapshot.getString("currentStop")
                         val nextStop = snapshot.getString("nextStop")
@@ -1929,7 +1953,6 @@ class CampusRideRepository(context: Context) {
                             return
                         }
 
-                        val existingCart = if (cartId == "cart_1") _cart1State.value else _cart2State.value
                         val effectiveLat = lat ?: existingCart.latitude
                         val effectiveLng = lng ?: existingCart.longitude
 
@@ -1949,8 +1972,9 @@ class CampusRideRepository(context: Context) {
                             isAvailable = effectiveIsAvailable,
                             driverStatus = effectiveDriverStatus,
                             lastUpdatedMillis = lastUpdated,
-                            lastHeartbeatMillis = lastHeartbeat,
+                            lastHeartbeatMillis = if (lastHeartbeat > 0L) lastHeartbeat else now,
                             locationTimestampMillis = locationTimestamp,
+                            localReceiptTimestampMillis = now,
                             distanceToGateMeters = currentDistGate,
                             distanceToUserMeters = currentDistGate,
                             direction = direction ?: existingCart.direction,
@@ -1972,10 +1996,9 @@ class CampusRideRepository(context: Context) {
                         if (_currentRole.value != UserRole.DRIVER) {
                             val anyAvailable = _fleetCarts.value.any { 
                                 it.isInsideCampus && !it.isOutsideCampus &&
-                                (it.isDriverOnline || (it.isAvailable && !it.driverStatus.equals("Offline", ignoreCase = true))) && 
+                                (it.isLive || it.isDriverOnline || (it.isAvailable && !it.driverStatus.equals("Offline", ignoreCase = true))) && 
                                 !it.driverStatus.equals("Lunch Break", ignoreCase = true) &&
-                                !it.driverStatus.equals("Outside Campus", ignoreCase = true) &&
-                                !it.driverStatus.equals("Driver Not Available", ignoreCase = true)
+                                !it.driverStatus.equals("Outside Campus", ignoreCase = true)
                             }
                             _isDriverAvailable.value = anyAvailable
                             Log.d("CAMPUS_RIDE_AVAILABILITY", "CART_SNAPSHOT_RECEIVED ($cartId): presenceState=${updatedCart.presenceState}, isDriverOnline=${updatedCart.isDriverOnline}, driverStatus=$effectiveDriverStatus -> Fleet available=$anyAvailable")
@@ -2033,7 +2056,8 @@ class CampusRideRepository(context: Context) {
     }
 
     fun resumePassengerLiveTracking() {
-        if (isPassengerTrackingPaused) {
+        if (_currentRole.value == UserRole.DRIVER) return
+        if (isPassengerTrackingPaused || cart1ListenerRegistration == null || cart2ListenerRegistration == null) {
             isPassengerTrackingPaused = false
             Log.d("CampusRideRepo", "RESUME_TRACKING: Restoring passenger cart Firestore listeners on foreground")
             startGolfCartLiveTrackingListener()
