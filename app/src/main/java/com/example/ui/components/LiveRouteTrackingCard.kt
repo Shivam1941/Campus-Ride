@@ -138,8 +138,8 @@ fun LiveRouteTrackingCard(
     ) {
         CampusRouteGraph.evaluateLiveProgress(
             cartId = displayCart?.cartId ?: selectedCartId,
-            latitude = if (!isCartOutside && isCartOnline && displayCart?.hasCoordinates == true && !displayCart.isLocationExpiredOrMissing) displayCart.latitude else null,
-            longitude = if (!isCartOutside && isCartOnline && displayCart?.hasCoordinates == true && !displayCart.isLocationExpiredOrMissing) displayCart.longitude else null,
+            latitude = if (!isCartOutside && !isCartOffline && displayCart?.hasCoordinates == true) displayCart.latitude else null,
+            longitude = if (!isCartOutside && !isCartOffline && displayCart?.hasCoordinates == true) displayCart.longitude else null,
             bearing = displayCart?.bearing,
             relativeMovement = displayCart?.relativeMovement,
             selectedDestination = facultySelectedLocation,

@@ -78,8 +78,7 @@ fun CampusCartCard(
     val isLocationStale = !isOutsideCampus && presence == com.example.data.model.CartPresenceState.ONLINE_LOCATION_STALE
     val isNoLocationYet = !isOutsideCampus && presence == com.example.data.model.CartPresenceState.ONLINE_NO_LOCATION
 
-    // Compute stable route position for precise "Between X & Y" and "Near Z" labels
-    val routeResult = if (!isOutsideCampus && hasCoordinates && !cartState.isLocationExpiredOrMissing) {
+    val routeResult = if (!isOutsideCampus && !isOffline && hasCoordinates) {
         CampusLandmarkZone.evaluateRoutePosition(
             latitude = cartState.latitude,
             longitude = cartState.longitude,

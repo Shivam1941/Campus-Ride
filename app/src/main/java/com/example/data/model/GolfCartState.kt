@@ -62,16 +62,36 @@ data class GolfCartState(
         get() {
             val ts = lastHeartbeatMillis ?: lastUpdatedMillis ?: return Long.MAX_VALUE
             val now = System.currentTimeMillis()
-            val rawAge = if (now >= ts) now - ts else 0L
-            return maxOf(rawAge, localReceiptAgeMs)
+            if (now < ts) {
+                // Remote clock is in the future (clock skew): rely on local elapsed time since receipt
+                return localReceiptAgeMs
+            }
+            val rawAge = now - ts
+            // If rawAge is relatively recent (< 5 min) and we recently received a live snapshot,
+            // don't let clock skew between devices falsely trigger expiration
+            return if (rawAge < 5 * 60_000L && localReceiptAgeMs < rawAge) {
+                localReceiptAgeMs
+            } else {
+                rawAge
+            }
         }
 
     val locationAgeMs: Long
         get() {
             val ts = locationTimestampMillis ?: lastUpdatedMillis ?: return Long.MAX_VALUE
             val now = System.currentTimeMillis()
-            val rawAge = if (now >= ts) now - ts else 0L
-            return maxOf(rawAge, localReceiptAgeMs)
+            if (now < ts) {
+                // Remote clock is in the future (clock skew): rely on local elapsed time since receipt
+                return localReceiptAgeMs
+            }
+            val rawAge = now - ts
+            // If rawAge is relatively recent (< 5 min) and we recently received a live snapshot,
+            // don't let clock skew between devices falsely trigger expiration
+            return if (rawAge < 5 * 60_000L && localReceiptAgeMs < rawAge) {
+                localReceiptAgeMs
+            } else {
+                rawAge
+            }
         }
 
     val hasCoordinates: Boolean

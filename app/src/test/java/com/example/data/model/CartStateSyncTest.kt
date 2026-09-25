@@ -149,4 +149,33 @@ class CartStateSyncTest {
         assertFalse("Expired cart should be offline", expiredCart.isDriverOnline)
         assertEquals(CartPresenceState.OFFLINE, expiredCart.presenceState)
     }
+
+    @Test
+    fun testClockSkewResilience_driverBehindDoesNotCauseStaleOrOffline() {
+        val now = System.currentTimeMillis()
+        // Driver phone clock is 60 seconds BEHIND student phone clock
+        val driverTimestampBehind = now - 60_000L
+
+        val cartState = GolfCartState(
+            cartId = "cart_1",
+            cartName = "Cart 1",
+            latitude = 25.2577810,
+            longitude = 87.0418910,
+            locationTimestampMillis = driverTimestampBehind,
+            lastHeartbeatMillis = driverTimestampBehind,
+            lastUpdatedMillis = driverTimestampBehind,
+            localReceiptTimestampMillis = now, // Received just now on student device
+            driverStatus = "Available",
+            isAvailable = true,
+            status = GolfCartStatus.HALTED
+        )
+
+        // Age should be bounded by local receipt age (close to 0 ms), not cross-device clock skew
+        assertTrue("Location age should be small on immediate receipt despite clock skew behind", cartState.locationAgeMs < 5_000L)
+        assertTrue("Heartbeat age should be small on immediate receipt despite clock skew behind", cartState.heartbeatAgeMs < 5_000L)
+        assertTrue("Cart should be driver online", cartState.isDriverOnline)
+        assertTrue("Location should be available", cartState.isLocationAvailable)
+        assertEquals(CartPresenceState.ONLINE_LOCATION_AVAILABLE, cartState.presenceState)
+        assertEquals("Live", cartState.presenceState.badgeText)
+    }
 }

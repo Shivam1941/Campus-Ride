@@ -1430,6 +1430,7 @@ class CampusRideRepository(context: Context) {
             lastUpdatedMillis = now,
             lastHeartbeatMillis = now,
             locationTimestampMillis = now,
+            localReceiptTimestampMillis = now,
             distanceToGateMeters = distToGate,
             distanceToUserMeters = distToGate,
             direction = evaluated?.directionSummary,
@@ -1909,8 +1910,9 @@ class CampusRideRepository(context: Context) {
                         )
 
                         // Monotonic update check: Ignore out-of-order snapshots from stale disk cache
-                        if (incomingBestTs > 0L && existingBestTs > 0L && incomingBestTs < existingBestTs) {
-                            Log.d("CampusRideRepo", "Ignoring out-of-order/stale snapshot for $cartId (incoming=$incomingBestTs < existing=$existingBestTs)")
+                        val isFromDiskCache = snapshot.metadata.isFromCache
+                        if (isFromDiskCache && incomingBestTs > 0L && existingBestTs > 0L && incomingBestTs < existingBestTs) {
+                            Log.d("CampusRideRepo", "Ignoring out-of-order/stale snapshot from disk cache for $cartId (incoming=$incomingBestTs < existing=$existingBestTs)")
                             return
                         }
 
@@ -2695,15 +2697,15 @@ class CampusRideRepository(context: Context) {
                             val isAvailable = cart1Doc.getBoolean("isAvailable") ?: true
                             val isTripActive = cart1Doc.getBoolean("isTripActive") ?: false
                             val driverStatus = cart1Doc.getString("driverStatus") ?: "Available"
-                            val isOutside1 = (lat != null && lng != null && !GeofenceManager.isInsideCampusGeofence(lat, lng)) ||
-                                             driverStatus.equals("Outside Campus", ignoreCase = true) ||
-                                             driverStatus.equals("Driver Not Available", ignoreCase = true)
+                            val hasCoords1 = (lat != null && lng != null && lat != 0.0 && lng != 0.0)
+                            val isPhysicallyInside1 = if (hasCoords1) GeofenceManager.isInsideCampusGeofence(lat!!, lng!!) else true
+                            val isOutside1 = if (hasCoords1) !isPhysicallyInside1 else driverStatus.equals("Outside Campus", ignoreCase = true)
                             val effectiveIsAvailable1 = if (isOutside1) false else isAvailable
                             val effectiveDriverStatus1 = if (isOutside1) "Driver Not Available" else driverStatus
                             var status = try { GolfCartStatus.valueOf(statusStr) } catch (e: Exception) { GolfCartStatus.HALTED }
                             if (isOutside1) {
                                 status = GolfCartStatus.OFFLINE
-                            } else if (status == GolfCartStatus.OFFLINE && (effectiveIsAvailable1 || effectiveDriverStatus1.equals("Available", ignoreCase = true) || effectiveDriverStatus1.equals("On Trip", ignoreCase = true))) {
+                            } else if (status == GolfCartStatus.OFFLINE && (effectiveIsAvailable1 || effectiveDriverStatus1.equals("Available", ignoreCase = true) || effectiveDriverStatus1.equals("On Trip", ignoreCase = true) || effectiveDriverStatus1.equals("On Duty", ignoreCase = true))) {
                                 status = if (speedKmH > 0) GolfCartStatus.MOVING else GolfCartStatus.HALTED
                             }
                             val lastUpdated = cart1Doc.safeLong("lastUpdatedMillis", cart1Doc.safeLong("last_seen", System.currentTimeMillis()))
@@ -2734,6 +2736,7 @@ class CampusRideRepository(context: Context) {
                                 lastUpdatedMillis = lastUpdated,
                                 lastHeartbeatMillis = lastHeartbeat,
                                 locationTimestampMillis = locationTimestamp,
+                                localReceiptTimestampMillis = System.currentTimeMillis(),
                                 distanceToGateMeters = currentDistGate,
                                 distanceToUserMeters = currentDistGate,
                                 direction = direction ?: existing1.direction,
@@ -2758,15 +2761,15 @@ class CampusRideRepository(context: Context) {
                             val isTripActive = cart2Doc.getBoolean("isTripActive") ?: false
                             val driverStatus = cart2Doc.getString("driverStatus") ?: "Available"
 
-                            val isOutside2 = (lat != null && lng != null && !GeofenceManager.isInsideCampusGeofence(lat, lng)) ||
-                                             driverStatus.equals("Outside Campus", ignoreCase = true) ||
-                                             driverStatus.equals("Driver Not Available", ignoreCase = true)
+                            val hasCoords2 = (lat != null && lng != null && lat != 0.0 && lng != 0.0)
+                            val isPhysicallyInside2 = if (hasCoords2) GeofenceManager.isInsideCampusGeofence(lat!!, lng!!) else true
+                            val isOutside2 = if (hasCoords2) !isPhysicallyInside2 else driverStatus.equals("Outside Campus", ignoreCase = true)
                             val effectiveIsAvailable2 = if (isOutside2) false else isAvailable
                             val effectiveDriverStatus2 = if (isOutside2) "Driver Not Available" else driverStatus
                             var status = try { GolfCartStatus.valueOf(statusStr) } catch (e: Exception) { GolfCartStatus.HALTED }
                             if (isOutside2) {
                                 status = GolfCartStatus.OFFLINE
-                            } else if (status == GolfCartStatus.OFFLINE && (effectiveIsAvailable2 || effectiveDriverStatus2.equals("Available", ignoreCase = true) || effectiveDriverStatus2.equals("On Trip", ignoreCase = true))) {
+                            } else if (status == GolfCartStatus.OFFLINE && (effectiveIsAvailable2 || effectiveDriverStatus2.equals("Available", ignoreCase = true) || effectiveDriverStatus2.equals("On Trip", ignoreCase = true) || effectiveDriverStatus2.equals("On Duty", ignoreCase = true))) {
                                 status = if (speedKmH > 0) GolfCartStatus.MOVING else GolfCartStatus.HALTED
                             }
                             val lastUpdated = cart2Doc.safeLong("lastUpdatedMillis", cart2Doc.safeLong("last_seen", System.currentTimeMillis()))
@@ -2797,6 +2800,7 @@ class CampusRideRepository(context: Context) {
                                 lastUpdatedMillis = lastUpdated,
                                 lastHeartbeatMillis = lastHeartbeat,
                                 locationTimestampMillis = locationTimestamp,
+                                localReceiptTimestampMillis = System.currentTimeMillis(),
                                 distanceToGateMeters = currentDistGate,
                                 distanceToUserMeters = currentDistGate,
                                 direction = direction ?: existing2.direction,
