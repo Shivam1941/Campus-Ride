@@ -43,6 +43,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.data.model.GolfCartState
+import com.example.data.model.PassengerCartAvailabilityPolicy
 import com.example.data.model.GolfCartStatus
 import com.example.location.CampusLandmarkZone
 
@@ -70,15 +71,14 @@ fun CampusCartCard(
 
     // Real-time presence & freshness evaluation
     val isOutsideCampus = cartState.isOutsideCampus || !cartState.isInsideCampus
-    val presence = if (isOutsideCampus) com.example.data.model.CartPresenceState.OFFLINE else cartState.presenceState
-    val isDriverOnline = cartState.isDriverOnline && !isOutsideCampus
-    val isOffline = presence == com.example.data.model.CartPresenceState.OFFLINE || isOutsideCampus
-    val hasCoordinates = cartState.hasCoordinates
-    val isLiveGps = !isOutsideCampus && presence == com.example.data.model.CartPresenceState.ONLINE_LOCATION_AVAILABLE
-    val isLocationStale = !isOutsideCampus && presence == com.example.data.model.CartPresenceState.ONLINE_LOCATION_STALE
-    val isNoLocationYet = !isOutsideCampus && presence == com.example.data.model.CartPresenceState.ONLINE_NO_LOCATION
+    val isLocationUsable = PassengerCartAvailabilityPolicy.isPhysicalLocationUsable(cartState)
+    val isRideAvailable = PassengerCartAvailabilityPolicy.isRideServiceAvailable(cartState)
+    val isLocationStale = cartState.isLocationStale && !isOutsideCampus
+    val isLiveGps = isLocationUsable && cartState.isLocationAvailable
+    val isNoLocationYet = !isOutsideCampus && !isLocationUsable && cartState.hasCoordinates
+    val isPhysicalOffline = !isLocationUsable
 
-    val routeResult = if (!isOutsideCampus && !isOffline && hasCoordinates) {
+    val routeResult = if (isLocationUsable) {
         CampusLandmarkZone.evaluateRoutePosition(
             latitude = cartState.latitude,
             longitude = cartState.longitude,
@@ -94,7 +94,7 @@ fun CampusCartCard(
     // Exact student-facing location string
     val locationDisplay = when {
         isOutsideCampus -> "Outside campus boundary"
-        isOffline -> "Location unavailable"
+        !isLocationUsable -> "Location unavailable"
         isNoLocationYet -> "Location updating..."
         routeResult != null -> {
             val suffix = if (isLocationStale) " (Stale)" else ""
@@ -113,7 +113,7 @@ fun CampusCartCard(
     // Approach / transit subtitle
     val approachDisplay = when {
         isOutsideCampus -> "Driver outside campus"
-        isOffline -> null
+        !isLocationUsable -> null
         isNoLocationYet -> "Waiting for GPS lock"
         routeResult != null && !routeResult.isAtGate && !routeResult.isAtLandmark ->
             routeResult.driverDirectionSubtitle
@@ -125,7 +125,10 @@ fun CampusCartCard(
     // Availability Classification
     val (availabilityText, availabilityColor, availabilityBg) = when {
         isOutsideCampus -> Triple("Driver Not Available", Color(0xFFDC2626), Color(0xFFFEF2F2))
-        isOffline -> Triple("Offline", Color(0xFF64748B), Color(0xFFF1F5F9))
+        cartState.driverStatus.equals("Lunch Break", ignoreCase = true) -> Triple("Lunch Break", Color(0xFFD97706), Color(0xFFFEF3C7))
+        cartState.driverStatus.equals("Driver Not Available", ignoreCase = true) -> Triple("Driver Not Available", Color(0xFFDC2626), Color(0xFFFEF2F2))
+        cartState.driverStatus.equals("Off Duty", ignoreCase = true) -> Triple("Off Duty", Color(0xFF64748B), Color(0xFFF1F5F9))
+        !isRideAvailable && !isLocationUsable -> Triple("Offline", Color(0xFF64748B), Color(0xFFF1F5F9))
         isLocationStale -> Triple("Online • Stale GPS", Color(0xFFD97706), Color(0xFFFEF3C7))
         cartState.isTripActive || cartState.activeRequestId != null || cartState.driverStatus?.contains("Busy", ignoreCase = true) == true ->
             Triple("Busy", Color(0xFFD97706), Color(0xFFFEF3C7))
@@ -138,7 +141,7 @@ fun CampusCartCard(
     val locationAgeSec = (cartState.locationAgeMs / 1000).coerceAtLeast(0)
     val relativeTimeText = when {
         isOutsideCampus -> "Driver not inside campus"
-        isOffline -> {
+        !isLocationUsable && !isRideAvailable -> {
             val lastSeenAge = cartState.heartbeatAgeMs
             if (lastSeenAge < Long.MAX_VALUE / 2) {
                 val diffMin = (lastSeenAge / 60_000).coerceAtLeast(1)
@@ -368,7 +371,7 @@ fun CampusCartCard(
                         Icon(
                             imageVector = Icons.Default.LocationOn,
                             contentDescription = "Location",
-                            tint = if (isOffline) Color(0xFF94A3B8) else Color(0xFFDC2626),
+                            tint = if (isPhysicalOffline) Color(0xFF94A3B8) else Color(0xFFDC2626),
                             modifier = Modifier.size(18.dp)
                         )
                         Spacer(modifier = Modifier.width(6.dp))
@@ -376,7 +379,7 @@ fun CampusCartCard(
                             text = locationDisplay,
                             fontSize = 14.sp,
                             fontWeight = FontWeight.Bold,
-                            color = if (isOffline) Color(0xFF64748B) else MaterialTheme.colorScheme.onSurface
+                            color = if (isPhysicalOffline) Color(0xFF64748B) else MaterialTheme.colorScheme.onSurface
                         )
                     }
 

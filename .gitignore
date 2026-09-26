@@ -18,3 +18,4 @@ local.properties
 debug.keystore
 *.log
 patch_render.py
+node_modules/

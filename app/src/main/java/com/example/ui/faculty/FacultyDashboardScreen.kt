@@ -70,6 +70,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.data.model.CampusCartConfig
 import com.example.data.model.GolfCartStatus
+import com.example.data.model.PassengerCartAvailabilityPolicy
 import com.example.data.model.PickupLocation
 import com.example.data.model.RideRequestStatus
 import com.example.data.model.ScheduleStatus
@@ -106,22 +107,9 @@ fun FacultyDashboardScreen(
     var isRefreshing by remember { mutableStateOf(false) }
     var isSendingRequest by remember { mutableStateOf(false) }
 
-    val isC1Available = cart1State.isInsideCampus && !cart1State.isOutsideCampus &&
-            (cart1State.isLive || cart1State.isDriverOnline ||
-                    (cart1State.isAvailable && !cart1State.driverStatus.equals("Offline", ignoreCase = true) &&
-                            !cart1State.driverStatus.equals("Lunch Break", ignoreCase = true) &&
-                            !cart1State.driverStatus.equals("Outside Campus", ignoreCase = true) &&
-                            !cart1State.driverStatus.equals("Driver Not Available", ignoreCase = true)))
-
-    val isC2Available = cart2State.isInsideCampus && !cart2State.isOutsideCampus &&
-            (cart2State.isLive || cart2State.isDriverOnline ||
-                    (cart2State.isAvailable && !cart2State.driverStatus.equals("Offline", ignoreCase = true) &&
-                            !cart2State.driverStatus.equals("Lunch Break", ignoreCase = true) &&
-                            !cart2State.driverStatus.equals("Outside Campus", ignoreCase = true) &&
-                            !cart2State.driverStatus.equals("Driver Not Available", ignoreCase = true)))
-
-    val isAnyDriverAvailable = isC1Available || isC2Available ||
-            (isDriverAvailable && (cart1State.isInsideCampus || cart2State.isInsideCampus))
+    val isC1Available = PassengerCartAvailabilityPolicy.isRideServiceAvailable(cart1State)
+    val isC2Available = PassengerCartAvailabilityPolicy.isRideServiceAvailable(cart2State)
+    val isAnyDriverAvailable = PassengerCartAvailabilityPolicy.isAnyRideServiceAvailable(cart1State, cart2State, isDriverAvailable)
 
     val scheduleStatus = ScheduleStatus.getCurrentStatus(overrideHours, isAnyDriverAvailable)
 

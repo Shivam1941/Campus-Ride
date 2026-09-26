@@ -1,5 +1,6 @@
 package com.example.location
 
+import com.example.data.model.GolfCartState
 import java.util.concurrent.ConcurrentHashMap
 import kotlin.math.*
 
@@ -789,3 +790,31 @@ object CampusRouteGraph {
         }
     }
 }
+
+/**
+ * Policy governing whether a cart's telemetry should be provided to the route engine.
+ *
+ * Enforces separation between physical location and operational ride availability:
+ * - If the cart has valid, non-expired coordinates inside campus, those coordinates
+ *   MUST be provided to CampusRouteGraph regardless of driver operational status
+ *   ("Driver Not Available", "Lunch Break", "Off Duty").
+ * - If coordinates are missing, invalid (0.0, 0.0), expired (> 180s), or outside campus,
+ *   coordinates are NOT provided (returns null).
+ */
+object RouteTrackingGatingPolicy {
+    fun extractUsableRouteCoordinates(cartState: GolfCartState?): Pair<Double, Double>? {
+        if (cartState == null) return null
+        if (!cartState.hasCoordinates) return null
+        val lat = cartState.latitude ?: return null
+        val lng = cartState.longitude ?: return null
+        if (lat == 0.0 || lng == 0.0) return null
+        if (cartState.isLocationExpiredOrMissing) return null
+        if (cartState.isOutsideCampus) return null
+        return Pair(lat, lng)
+    }
+
+    fun isRouteTrackingAvailable(cartState: GolfCartState?): Boolean {
+        return extractUsableRouteCoordinates(cartState) != null
+    }
+}
+

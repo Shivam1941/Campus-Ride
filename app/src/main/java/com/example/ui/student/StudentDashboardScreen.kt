@@ -48,6 +48,7 @@ import android.net.Uri
 import android.content.Intent
 import com.example.ui.components.LiveRouteTrackingCard
 import com.example.ui.components.CampusPullToRefreshBox
+import com.example.data.model.PassengerCartAvailabilityPolicy
 import com.example.data.model.UserRole
 import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material.icons.filled.Settings
@@ -240,22 +241,9 @@ fun StudentDashboardScreen(
     val measuredDistanceMeters = GeofenceManager.calculateDistanceMeters(activeLat, activeLng).roundToInt()
     val isNearGate = measuredDistanceMeters <= GeofenceManager.MAX_GEOFENCE_METERS
 
-    val isC1Available = cart1State.isInsideCampus && !cart1State.isOutsideCampus &&
-            (cart1State.isLive || cart1State.isDriverOnline ||
-                    (cart1State.isAvailable && !cart1State.driverStatus.equals("Offline", ignoreCase = true) &&
-                            !cart1State.driverStatus.equals("Lunch Break", ignoreCase = true) &&
-                            !cart1State.driverStatus.equals("Outside Campus", ignoreCase = true) &&
-                            !cart1State.driverStatus.equals("Driver Not Available", ignoreCase = true)))
-
-    val isC2Available = cart2State.isInsideCampus && !cart2State.isOutsideCampus &&
-            (cart2State.isLive || cart2State.isDriverOnline ||
-                    (cart2State.isAvailable && !cart2State.driverStatus.equals("Offline", ignoreCase = true) &&
-                            !cart2State.driverStatus.equals("Lunch Break", ignoreCase = true) &&
-                            !cart2State.driverStatus.equals("Outside Campus", ignoreCase = true) &&
-                            !cart2State.driverStatus.equals("Driver Not Available", ignoreCase = true)))
-
-    val isAnyDriverAvailable = isC1Available || isC2Available ||
-            (isDriverAvailable && (cart1State.isInsideCampus || cart2State.isInsideCampus))
+    val isC1Available = PassengerCartAvailabilityPolicy.isRideServiceAvailable(cart1State)
+    val isC2Available = PassengerCartAvailabilityPolicy.isRideServiceAvailable(cart2State)
+    val isAnyDriverAvailable = PassengerCartAvailabilityPolicy.isAnyRideServiceAvailable(cart1State, cart2State, isDriverAvailable)
 
     val scheduleStatus = ScheduleStatus.getCurrentStatus(overrideHours, isAnyDriverAvailable)
 
@@ -545,7 +533,7 @@ fun StudentDashboardScreen(
                                         color = statusColors.onInfoContainer.copy(alpha = 0.85f)
                                     )
                                 } else {
-                                    val isCartOnline = activeCartState.isLive
+                                    val isCartOnline = activeCartState.isLive || activeCartState.isDriverOnline
                                     val cartNameText = req.assignedCartName ?: if (selectedCartTab == "cart_1") "Cart 1" else "Cart 2"
                                     val titleText = if (isCartOnline) "Request Sent to Driver" else "Request Pending (Cart Offline)"
                                     Text(
@@ -1290,17 +1278,26 @@ private fun StudentCartSelectionCard(
     onClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    val isLive = cartState.isLive
-    val isOnline = isLive || cartState.isDriverOnline
+    val isLocationUsable = PassengerCartAvailabilityPolicy.isPhysicalLocationUsable(cartState)
+    val isRideAvailable = PassengerCartAvailabilityPolicy.isRideServiceAvailable(cartState)
+
     val statusText = when {
-        isLive -> "Live"
-        isOnline -> "Online"
-        else -> "Offline"
+        isRideAvailable && cartState.isLive -> "Live"
+        isRideAvailable -> "Available"
+        cartState.driverStatus.equals("Lunch Break", ignoreCase = true) -> "Lunch Break"
+        cartState.driverStatus.equals("Driver Not Available", ignoreCase = true) -> "Unavailable"
+        cartState.driverStatus.equals("Off Duty", ignoreCase = true) -> "Off Duty"
+        cartState.isOutsideCampus -> "Outside"
+        !isLocationUsable -> "Offline"
+        else -> cartState.effectiveAvailabilityLabel
     }
     val statusColor = when {
-        isLive -> Color(0xFF16A34A)
-        isOnline -> Color(0xFF2563EB)
-        else -> Color(0xFF64748B)
+        isRideAvailable -> Color(0xFF16A34A)
+        cartState.driverStatus.equals("Lunch Break", ignoreCase = true) ||
+        cartState.driverStatus.equals("Driver Not Available", ignoreCase = true) -> Color(0xFFD97706)
+        cartState.isOutsideCampus -> Color(0xFFDC2626)
+        !isLocationUsable -> Color(0xFF64748B)
+        else -> Color(0xFF2563EB)
     }
 
     Surface(
@@ -1343,7 +1340,7 @@ private fun StudentCartSelectionCard(
             }
             Spacer(modifier = Modifier.height(4.dp))
             Text(
-                text = if (isOnline) cartState.landmarkZone else "Offline",
+                text = if (isLocationUsable) cartState.landmarkZone else if (cartState.isOutsideCampus) "Outside campus" else "Offline",
                 fontSize = 11.sp,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 maxLines = 1

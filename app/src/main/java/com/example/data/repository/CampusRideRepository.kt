@@ -354,6 +354,11 @@ class CampusRideRepository(context: Context) {
     )
     val fleetCarts: StateFlow<List<GolfCartState>> = _fleetCarts.asStateFlow()
 
+    @Volatile
+    private var cart1HasLiveServerData = false
+    @Volatile
+    private var cart2HasLiveServerData = false
+
     // Active Golf Cart State for current user session (aliases selected cart)
     private val _golfCartState = MutableStateFlow<GolfCartState?>(_cart1State.value)
     val golfCartState: StateFlow<GolfCartState?> = _golfCartState.asStateFlow()
@@ -892,7 +897,8 @@ class CampusRideRepository(context: Context) {
             val updated = existing.copy(
                 isAvailable = false,
                 driverStatus = "Offline",
-                status = GolfCartStatus.OFFLINE
+                status = GolfCartStatus.OFFLINE,
+                localReceiptTimestampMillis = System.currentTimeMillis()
             )
             if (activeCartId == "cart_1") _cart1State.value = updated else _cart2State.value = updated
             _fleetCarts.value = listOf(_cart1State.value, _cart2State.value)
@@ -909,7 +915,8 @@ class CampusRideRepository(context: Context) {
                 val updated = existing.copy(
                     isAvailable = true,
                     driverStatus = "Available",
-                    status = GolfCartStatus.HALTED
+                    status = GolfCartStatus.HALTED,
+                    localReceiptTimestampMillis = System.currentTimeMillis()
                 )
                 if (activeCartId == "cart_1") _cart1State.value = updated else _cart2State.value = updated
                 _fleetCarts.value = listOf(_cart1State.value, _cart2State.value)
@@ -1644,7 +1651,8 @@ class CampusRideRepository(context: Context) {
             isAvailable = effectiveAvailable,
             isTripActive = isOccupied,
             driverStatus = displayStatus,
-            status = if (effectiveAvailable || isOccupied) GolfCartStatus.HALTED else GolfCartStatus.OFFLINE
+            status = if (effectiveAvailable || isOccupied) GolfCartStatus.HALTED else GolfCartStatus.OFFLINE,
+            localReceiptTimestampMillis = System.currentTimeMillis()
         )
         _fleetCarts.value = _fleetCarts.value.map {
             if (it.cartId == activeCartId) {
@@ -1652,7 +1660,8 @@ class CampusRideRepository(context: Context) {
                     isAvailable = effectiveAvailable,
                     isTripActive = isOccupied,
                     driverStatus = displayStatus,
-                    status = if (effectiveAvailable || isOccupied) GolfCartStatus.HALTED else GolfCartStatus.OFFLINE
+                    status = if (effectiveAvailable || isOccupied) GolfCartStatus.HALTED else GolfCartStatus.OFFLINE,
+                    localReceiptTimestampMillis = System.currentTimeMillis()
                 )
             } else it
         }
@@ -1662,7 +1671,8 @@ class CampusRideRepository(context: Context) {
             isAvailable = effectiveAvailable,
             isTripActive = isOccupied,
             driverStatus = displayStatus,
-            status = if (effectiveAvailable || isOccupied) GolfCartStatus.HALTED else GolfCartStatus.OFFLINE
+            status = if (effectiveAvailable || isOccupied) GolfCartStatus.HALTED else GolfCartStatus.OFFLINE,
+            localReceiptTimestampMillis = System.currentTimeMillis()
         )
 
         Log.d("CAMPUS_RIDE_AVAILABILITY", "DRIVER_ROLE: Evaluated availability=$effectiveAvailable (manualOnDuty=$manualOnDuty, isInside=${_isInsideGeofence.value}, hasGps=${_hasGpsLocation.value}, isOccupied=$isOccupied)")
@@ -1769,7 +1779,8 @@ class CampusRideRepository(context: Context) {
         targetFlow.value = targetFlow.value.copy(
             status = if (!available) GolfCartStatus.OFFLINE else GolfCartStatus.HALTED,
             isAvailable = available,
-            driverStatus = if (available) "Available" else "Offline"
+            driverStatus = if (available) "Available" else "Offline",
+            localReceiptTimestampMillis = System.currentTimeMillis()
         )
         _golfCartState.value = targetFlow.value
     }
@@ -1788,7 +1799,8 @@ class CampusRideRepository(context: Context) {
             isTripActive = true,
             isAvailable = true,
             driverStatus = "On Duty",
-            lastUpdatedMillis = System.currentTimeMillis()
+            lastUpdatedMillis = System.currentTimeMillis(),
+            localReceiptTimestampMillis = System.currentTimeMillis()
         )
         targetFlow.value = updated
         _fleetCarts.value = listOf(_cart1State.value, _cart2State.value)
@@ -1829,7 +1841,8 @@ class CampusRideRepository(context: Context) {
             isAvailable = false,
             driverStatus = "Offline",
             speedKmH = 0,
-            lastUpdatedMillis = System.currentTimeMillis()
+            lastUpdatedMillis = System.currentTimeMillis(),
+            localReceiptTimestampMillis = System.currentTimeMillis()
         )
         targetFlow.value = updated
         _fleetCarts.value = listOf(_cart1State.value, _cart2State.value)
@@ -1898,90 +1911,58 @@ class CampusRideRepository(context: Context) {
                     fun handleCartSnapshot(cartId: String, snapshot: com.google.firebase.firestore.DocumentSnapshot?) {
                         if (snapshot == null || !snapshot.exists()) return
 
-                        val existingCart = if (cartId == "cart_1") _cart1State.value else _cart2State.value
+                        val isFromDiskCache = snapshot.metadata.isFromCache
+                        val hasLiveServerData = if (cartId == "cart_1") cart1HasLiveServerData else cart2HasLiveServerData
 
                         val incomingUpdated = snapshot.safeLong("lastUpdatedMillis", snapshot.safeLong("last_seen", 0L))
                         val incomingLocationTs = snapshot.safeLong("locationTimestampMillis", 0L)
                         val incomingBestTs = maxOf(incomingUpdated, incomingLocationTs)
 
+                        val existingCart = if (cartId == "cart_1") _cart1State.value else _cart2State.value
                         val existingBestTs = maxOf(
                             existingCart.lastUpdatedMillis ?: 0L,
                             existingCart.locationTimestampMillis ?: 0L
                         )
 
-                        // Monotonic update check: Ignore out-of-order snapshots from stale disk cache
-                        val isFromDiskCache = snapshot.metadata.isFromCache
-                        if (isFromDiskCache && incomingBestTs > 0L && existingBestTs > 0L && incomingBestTs < existingBestTs) {
-                            Log.d("CampusRideRepo", "Ignoring out-of-order/stale snapshot from disk cache for $cartId (incoming=$incomingBestTs < existing=$existingBestTs)")
+                        if (!FirestoreSnapshotIngestionPolicy.shouldProcessSnapshot(
+                                isFromDiskCache = isFromDiskCache,
+                                hasLiveServerData = hasLiveServerData,
+                                incomingBestTs = incomingBestTs,
+                                existingBestTs = existingBestTs
+                            )) {
+                            Log.d("CampusRideRepo", "Ignoring snapshot for $cartId (isFromCache=$isFromDiskCache, hasLiveServerData=$hasLiveServerData, incoming=$incomingBestTs, existing=$existingBestTs)")
                             return
                         }
 
-                        val lat = snapshot.safeDouble("latitude")
-                        val lng = snapshot.safeDouble("longitude")
-                        val bearing = snapshot.safeFloat("bearing", 0f)
-                        val speedKmH = snapshot.safeInt("speedKmH", 0)
-                        val statusStr = snapshot.getString("status") ?: "HALTED"
-                        var status = try { GolfCartStatus.valueOf(statusStr) } catch (e: Exception) { GolfCartStatus.HALTED }
-                        val isAvailable = snapshot.getBoolean("isAvailable") ?: true
-                        val isTripActive = snapshot.getBoolean("isTripActive") ?: false
-                        val driverStatus = snapshot.getString("driverStatus") ?: "Available"
-
-                        // Physical Campus Geofence Evaluation:
-                        // Coordinates decide physical boundary. driverStatus only used as fallback if coords missing.
-                        val hasCoords = (lat != null && lng != null && lat != 0.0 && lng != 0.0)
-                        val isPhysicallyInside = if (hasCoords) GeofenceManager.isInsideCampusGeofence(lat!!, lng!!) else true
-                        val isOutside = if (hasCoords) !isPhysicallyInside else driverStatus.equals("Outside Campus", ignoreCase = true)
-
-                        var effectiveIsAvailable = isAvailable
-                        var effectiveDriverStatus = driverStatus
-                        if (isOutside) {
-                            effectiveIsAvailable = false
-                            effectiveDriverStatus = "Driver Not Available"
-                            status = GolfCartStatus.OFFLINE
-                        } else if (status == GolfCartStatus.OFFLINE && (effectiveIsAvailable || effectiveDriverStatus.equals("Available", ignoreCase = true) || effectiveDriverStatus.equals("On Trip", ignoreCase = true) || effectiveDriverStatus.equals("On Duty", ignoreCase = true))) {
-                            status = if (speedKmH > 0) GolfCartStatus.MOVING else GolfCartStatus.HALTED
+                        if (!isFromDiskCache) {
+                            if (cartId == "cart_1") cart1HasLiveServerData = true else cart2HasLiveServerData = true
                         }
-
-                        val now = System.currentTimeMillis()
-                        val lastUpdated = if (incomingUpdated > 0L) incomingUpdated else now
-                        val lastHeartbeat = snapshot.safeLong("lastHeartbeatMillis", snapshot.safeLong("last_seen", lastUpdated))
-                        val locationTimestamp = if (incomingLocationTs > 0L) incomingLocationTs else if (lat != null && lng != null) lastUpdated else null
-                        val direction = snapshot.getString("direction")
-                        val currentStop = snapshot.getString("currentStop")
-                        val nextStop = snapshot.getString("nextStop")
 
                         // If driver on this phone is driving this cart, don't overwrite local live GPS
                         if (_currentRole.value == UserRole.DRIVER && _selectedDriverCartId.value == cartId && _hasGpsLocation.value) {
                             return
                         }
 
-                        val effectiveLat = lat ?: existingCart.latitude
-                        val effectiveLng = lng ?: existingCart.longitude
-
-                        val currentDistGate = if (effectiveLat != null && effectiveLng != null) {
-                            GeofenceManager.calculateDistanceMeters(effectiveLat, effectiveLng, GeofenceManager.GATE_LAT, GeofenceManager.GATE_LNG).roundToInt()
-                        } else 0
-
-                        val updatedCart = existingCart.copy(
+                        val now = System.currentTimeMillis()
+                        val updatedCart = FirestoreSnapshotIngestionPolicy.resolveEffectiveCartState(
+                            existingCart = existingCart,
                             cartId = cartId,
                             cartName = if (cartId == "cart_1") "Cart 1" else "Cart 2",
-                            latitude = effectiveLat,
-                            longitude = effectiveLng,
-                            speedKmH = speedKmH,
-                            bearing = bearing,
-                            status = status,
-                            isTripActive = isTripActive,
-                            isAvailable = effectiveIsAvailable,
-                            driverStatus = effectiveDriverStatus,
-                            lastUpdatedMillis = lastUpdated,
-                            lastHeartbeatMillis = if (lastHeartbeat > 0L) lastHeartbeat else now,
-                            locationTimestampMillis = locationTimestamp,
-                            localReceiptTimestampMillis = now,
-                            distanceToGateMeters = currentDistGate,
-                            distanceToUserMeters = currentDistGate,
-                            direction = direction ?: existingCart.direction,
-                            currentStop = currentStop ?: existingCart.currentStop,
-                            nextStop = nextStop ?: existingCart.nextStop
+                            lat = snapshot.safeDouble("latitude"),
+                            lng = snapshot.safeDouble("longitude"),
+                            speedKmH = snapshot.safeInt("speedKmH", 0),
+                            bearing = snapshot.safeFloat("bearing", 0f),
+                            rawStatusStr = snapshot.getString("status"),
+                            isAvailable = snapshot.getBoolean("isAvailable") ?: true,
+                            isTripActive = snapshot.getBoolean("isTripActive") ?: false,
+                            driverStatus = snapshot.getString("driverStatus") ?: "Available",
+                            incomingUpdated = incomingUpdated,
+                            incomingHeartbeat = snapshot.safeLong("lastHeartbeatMillis", snapshot.safeLong("last_seen", incomingUpdated)),
+                            incomingLocationTs = incomingLocationTs,
+                            direction = snapshot.getString("direction"),
+                            currentStop = snapshot.getString("currentStop"),
+                            nextStop = snapshot.getString("nextStop"),
+                            localReceiptTime = now
                         )
 
                         if (cartId == "cart_1") {
@@ -2003,7 +1984,7 @@ class CampusRideRepository(context: Context) {
                                 !it.driverStatus.equals("Outside Campus", ignoreCase = true)
                             }
                             _isDriverAvailable.value = anyAvailable
-                            Log.d("CAMPUS_RIDE_AVAILABILITY", "CART_SNAPSHOT_RECEIVED ($cartId): presenceState=${updatedCart.presenceState}, isDriverOnline=${updatedCart.isDriverOnline}, driverStatus=$effectiveDriverStatus -> Fleet available=$anyAvailable")
+                            Log.d("CAMPUS_RIDE_AVAILABILITY", "CART_SNAPSHOT_RECEIVED ($cartId): presenceState=${updatedCart.presenceState}, isDriverOnline=${updatedCart.isDriverOnline}, driverStatus=${updatedCart.driverStatus} -> Fleet available=$anyAvailable")
                         }
                     }
 
@@ -2469,7 +2450,12 @@ class CampusRideRepository(context: Context) {
 
         targetReq?.assignedCartId?.let { cartId ->
             _fleetCarts.value = _fleetCarts.value.map {
-                if (it.cartId == cartId) it.copy(isAvailable = false, activeRequestId = requestId, driverStatus = "Occupied")
+                if (it.cartId == cartId) it.copy(
+                    isAvailable = false,
+                    activeRequestId = requestId,
+                    driverStatus = "Occupied",
+                    localReceiptTimestampMillis = System.currentTimeMillis()
+                )
                 else it
             }
         }
@@ -2540,7 +2526,12 @@ class CampusRideRepository(context: Context) {
         val effectiveCartId = targetReq?.assignedCartId ?: _selectedDriverCartId.value
         targetReq?.assignedCartId?.let { cartId ->
             _fleetCarts.value = _fleetCarts.value.map {
-                if (it.cartId == cartId) it.copy(isAvailable = true, activeRequestId = null, driverStatus = "Available")
+                if (it.cartId == cartId) it.copy(
+                    isAvailable = true,
+                    activeRequestId = null,
+                    driverStatus = "Available",
+                    localReceiptTimestampMillis = System.currentTimeMillis()
+                )
                 else it
             }
         }
@@ -2586,7 +2577,12 @@ class CampusRideRepository(context: Context) {
         val effectiveCartId = targetReq?.assignedCartId ?: _selectedDriverCartId.value
         targetReq?.assignedCartId?.let { cartId ->
             _fleetCarts.value = _fleetCarts.value.map {
-                if (it.cartId == cartId) it.copy(isAvailable = true, activeRequestId = null, driverStatus = "Available")
+                if (it.cartId == cartId) it.copy(
+                    isAvailable = true,
+                    activeRequestId = null,
+                    driverStatus = "Available",
+                    localReceiptTimestampMillis = System.currentTimeMillis()
+                )
                 else it
             }
         }
@@ -2641,7 +2637,11 @@ class CampusRideRepository(context: Context) {
     fun setGolfCartEnabled(cartId: String, enabled: Boolean) {
         _fleetCarts.value = _fleetCarts.value.map {
             if (it.cartId == cartId) {
-                it.copy(isAvailable = enabled, driverStatus = if (enabled) "Available" else "Offline")
+                it.copy(
+                    isAvailable = enabled,
+                    driverStatus = if (enabled) "Available" else "Offline",
+                    localReceiptTimestampMillis = System.currentTimeMillis()
+                )
             } else it
         }
     }
@@ -2689,60 +2689,45 @@ class CampusRideRepository(context: Context) {
                     try {
                         val cart1Doc = firestore.collection("drivers").document("cart_1").get().awaitTask()
                         if (cart1Doc.exists()) {
-                            val lat = cart1Doc.safeDouble("latitude")
-                            val lng = cart1Doc.safeDouble("longitude")
-                            val bearing = cart1Doc.safeFloat("bearing", 0f)
-                            val speedKmH = cart1Doc.safeInt("speedKmH", 0)
-                            val statusStr = cart1Doc.getString("status") ?: "HALTED"
-                            val isAvailable = cart1Doc.getBoolean("isAvailable") ?: true
-                            val isTripActive = cart1Doc.getBoolean("isTripActive") ?: false
-                            val driverStatus = cart1Doc.getString("driverStatus") ?: "Available"
-                            val hasCoords1 = (lat != null && lng != null && lat != 0.0 && lng != 0.0)
-                            val isPhysicallyInside1 = if (hasCoords1) GeofenceManager.isInsideCampusGeofence(lat!!, lng!!) else true
-                            val isOutside1 = if (hasCoords1) !isPhysicallyInside1 else driverStatus.equals("Outside Campus", ignoreCase = true)
-                            val effectiveIsAvailable1 = if (isOutside1) false else isAvailable
-                            val effectiveDriverStatus1 = if (isOutside1) "Driver Not Available" else driverStatus
-                            var status = try { GolfCartStatus.valueOf(statusStr) } catch (e: Exception) { GolfCartStatus.HALTED }
-                            if (isOutside1) {
-                                status = GolfCartStatus.OFFLINE
-                            } else if (status == GolfCartStatus.OFFLINE && (effectiveIsAvailable1 || effectiveDriverStatus1.equals("Available", ignoreCase = true) || effectiveDriverStatus1.equals("On Trip", ignoreCase = true) || effectiveDriverStatus1.equals("On Duty", ignoreCase = true))) {
-                                status = if (speedKmH > 0) GolfCartStatus.MOVING else GolfCartStatus.HALTED
-                            }
-                            val lastUpdated = cart1Doc.safeLong("lastUpdatedMillis", cart1Doc.safeLong("last_seen", System.currentTimeMillis()))
-                            val lastHeartbeat = cart1Doc.safeLong("lastHeartbeatMillis", cart1Doc.safeLong("last_seen", lastUpdated))
-                            val locationTimestamp = cart1Doc.safeLong("locationTimestampMillis", if (lat != null && lng != null) lastUpdated else 0L).let { if (it > 0L) it else null }
-                            val direction = cart1Doc.getString("direction")
-                            val currentStop = cart1Doc.getString("currentStop")
-                            val nextStop = cart1Doc.getString("nextStop")
+                            val isFromDiskCache = cart1Doc.metadata.isFromCache
+                            val incomingUpdated = cart1Doc.safeLong("lastUpdatedMillis", cart1Doc.safeLong("last_seen", 0L))
+                            val incomingLocationTs = cart1Doc.safeLong("locationTimestampMillis", 0L)
+                            val incomingBestTs = maxOf(incomingUpdated, incomingLocationTs)
 
                             val existing1 = _cart1State.value
-                            val effectiveLat = lat ?: existing1.latitude
-                            val effectiveLng = lng ?: existing1.longitude
-                            val currentDistGate = if (effectiveLat != null && effectiveLng != null) {
-                                GeofenceManager.calculateDistanceMeters(effectiveLat, effectiveLng, GeofenceManager.GATE_LAT, GeofenceManager.GATE_LNG).roundToInt()
-                            } else existing1.distanceToGateMeters ?: 0
-
-                            _cart1State.value = existing1.copy(
-                                cartId = "cart_1",
-                                cartName = "Cart 1",
-                                latitude = effectiveLat,
-                                longitude = effectiveLng,
-                                speedKmH = speedKmH,
-                                bearing = bearing,
-                                status = status,
-                                isTripActive = isTripActive,
-                                isAvailable = effectiveIsAvailable1,
-                                driverStatus = effectiveDriverStatus1,
-                                lastUpdatedMillis = lastUpdated,
-                                lastHeartbeatMillis = lastHeartbeat,
-                                locationTimestampMillis = locationTimestamp,
-                                localReceiptTimestampMillis = System.currentTimeMillis(),
-                                distanceToGateMeters = currentDistGate,
-                                distanceToUserMeters = currentDistGate,
-                                direction = direction ?: existing1.direction,
-                                currentStop = currentStop ?: existing1.currentStop,
-                                nextStop = nextStop ?: existing1.nextStop
+                            val existingBestTs = maxOf(
+                                existing1.lastUpdatedMillis ?: 0L,
+                                existing1.locationTimestampMillis ?: 0L
                             )
+
+                            if (FirestoreSnapshotIngestionPolicy.shouldProcessSnapshot(
+                                    isFromDiskCache = isFromDiskCache,
+                                    hasLiveServerData = cart1HasLiveServerData,
+                                    incomingBestTs = incomingBestTs,
+                                    existingBestTs = existingBestTs
+                                )) {
+                                if (!isFromDiskCache) cart1HasLiveServerData = true
+                                _cart1State.value = FirestoreSnapshotIngestionPolicy.resolveEffectiveCartState(
+                                    existingCart = existing1,
+                                    cartId = "cart_1",
+                                    cartName = "Cart 1",
+                                    lat = cart1Doc.safeDouble("latitude"),
+                                    lng = cart1Doc.safeDouble("longitude"),
+                                    speedKmH = cart1Doc.safeInt("speedKmH", 0),
+                                    bearing = cart1Doc.safeFloat("bearing", 0f),
+                                    rawStatusStr = cart1Doc.getString("status"),
+                                    isAvailable = cart1Doc.getBoolean("isAvailable") ?: true,
+                                    isTripActive = cart1Doc.getBoolean("isTripActive") ?: false,
+                                    driverStatus = cart1Doc.getString("driverStatus") ?: "Available",
+                                    incomingUpdated = incomingUpdated,
+                                    incomingHeartbeat = cart1Doc.safeLong("lastHeartbeatMillis", cart1Doc.safeLong("last_seen", incomingUpdated)),
+                                    incomingLocationTs = incomingLocationTs,
+                                    direction = cart1Doc.getString("direction"),
+                                    currentStop = cart1Doc.getString("currentStop"),
+                                    nextStop = cart1Doc.getString("nextStop"),
+                                    localReceiptTime = System.currentTimeMillis()
+                                )
+                            }
                         }
                     } catch (e: Exception) {
                         Log.w("CampusRideRepo", "Refresh cart_1 fetch warning: ${e.message}")
@@ -2752,61 +2737,45 @@ class CampusRideRepository(context: Context) {
                     try {
                         val cart2Doc = firestore.collection("drivers").document("cart_2").get().awaitTask()
                         if (cart2Doc.exists()) {
-                            val lat = cart2Doc.safeDouble("latitude")
-                            val lng = cart2Doc.safeDouble("longitude")
-                            val bearing = cart2Doc.safeFloat("bearing", 0f)
-                            val speedKmH = cart2Doc.safeInt("speedKmH", 0)
-                            val statusStr = cart2Doc.getString("status") ?: "HALTED"
-                            val isAvailable = cart2Doc.getBoolean("isAvailable") ?: true
-                            val isTripActive = cart2Doc.getBoolean("isTripActive") ?: false
-                            val driverStatus = cart2Doc.getString("driverStatus") ?: "Available"
-
-                            val hasCoords2 = (lat != null && lng != null && lat != 0.0 && lng != 0.0)
-                            val isPhysicallyInside2 = if (hasCoords2) GeofenceManager.isInsideCampusGeofence(lat!!, lng!!) else true
-                            val isOutside2 = if (hasCoords2) !isPhysicallyInside2 else driverStatus.equals("Outside Campus", ignoreCase = true)
-                            val effectiveIsAvailable2 = if (isOutside2) false else isAvailable
-                            val effectiveDriverStatus2 = if (isOutside2) "Driver Not Available" else driverStatus
-                            var status = try { GolfCartStatus.valueOf(statusStr) } catch (e: Exception) { GolfCartStatus.HALTED }
-                            if (isOutside2) {
-                                status = GolfCartStatus.OFFLINE
-                            } else if (status == GolfCartStatus.OFFLINE && (effectiveIsAvailable2 || effectiveDriverStatus2.equals("Available", ignoreCase = true) || effectiveDriverStatus2.equals("On Trip", ignoreCase = true) || effectiveDriverStatus2.equals("On Duty", ignoreCase = true))) {
-                                status = if (speedKmH > 0) GolfCartStatus.MOVING else GolfCartStatus.HALTED
-                            }
-                            val lastUpdated = cart2Doc.safeLong("lastUpdatedMillis", cart2Doc.safeLong("last_seen", System.currentTimeMillis()))
-                            val lastHeartbeat = cart2Doc.safeLong("lastHeartbeatMillis", cart2Doc.safeLong("last_seen", lastUpdated))
-                            val locationTimestamp = cart2Doc.safeLong("locationTimestampMillis", if (lat != null && lng != null) lastUpdated else 0L).let { if (it > 0L) it else null }
-                            val direction = cart2Doc.getString("direction")
-                            val currentStop = cart2Doc.getString("currentStop")
-                            val nextStop = cart2Doc.getString("nextStop")
+                            val isFromDiskCache = cart2Doc.metadata.isFromCache
+                            val incomingUpdated = cart2Doc.safeLong("lastUpdatedMillis", cart2Doc.safeLong("last_seen", 0L))
+                            val incomingLocationTs = cart2Doc.safeLong("locationTimestampMillis", 0L)
+                            val incomingBestTs = maxOf(incomingUpdated, incomingLocationTs)
 
                             val existing2 = _cart2State.value
-                            val effectiveLat = lat ?: existing2.latitude
-                            val effectiveLng = lng ?: existing2.longitude
-                            val currentDistGate = if (effectiveLat != null && effectiveLng != null) {
-                                GeofenceManager.calculateDistanceMeters(effectiveLat, effectiveLng, GeofenceManager.GATE_LAT, GeofenceManager.GATE_LNG).roundToInt()
-                            } else existing2.distanceToGateMeters ?: 0
-
-                            _cart2State.value = existing2.copy(
-                                cartId = "cart_2",
-                                cartName = "Cart 2",
-                                latitude = effectiveLat,
-                                longitude = effectiveLng,
-                                speedKmH = speedKmH,
-                                bearing = bearing,
-                                status = status,
-                                isTripActive = isTripActive,
-                                isAvailable = effectiveIsAvailable2,
-                                driverStatus = effectiveDriverStatus2,
-                                lastUpdatedMillis = lastUpdated,
-                                lastHeartbeatMillis = lastHeartbeat,
-                                locationTimestampMillis = locationTimestamp,
-                                localReceiptTimestampMillis = System.currentTimeMillis(),
-                                distanceToGateMeters = currentDistGate,
-                                distanceToUserMeters = currentDistGate,
-                                direction = direction ?: existing2.direction,
-                                currentStop = currentStop ?: existing2.currentStop,
-                                nextStop = nextStop ?: existing2.nextStop
+                            val existingBestTs = maxOf(
+                                existing2.lastUpdatedMillis ?: 0L,
+                                existing2.locationTimestampMillis ?: 0L
                             )
+
+                            if (FirestoreSnapshotIngestionPolicy.shouldProcessSnapshot(
+                                    isFromDiskCache = isFromDiskCache,
+                                    hasLiveServerData = cart2HasLiveServerData,
+                                    incomingBestTs = incomingBestTs,
+                                    existingBestTs = existingBestTs
+                                )) {
+                                if (!isFromDiskCache) cart2HasLiveServerData = true
+                                _cart2State.value = FirestoreSnapshotIngestionPolicy.resolveEffectiveCartState(
+                                    existingCart = existing2,
+                                    cartId = "cart_2",
+                                    cartName = "Cart 2",
+                                    lat = cart2Doc.safeDouble("latitude"),
+                                    lng = cart2Doc.safeDouble("longitude"),
+                                    speedKmH = cart2Doc.safeInt("speedKmH", 0),
+                                    bearing = cart2Doc.safeFloat("bearing", 0f),
+                                    rawStatusStr = cart2Doc.getString("status"),
+                                    isAvailable = cart2Doc.getBoolean("isAvailable") ?: true,
+                                    isTripActive = cart2Doc.getBoolean("isTripActive") ?: false,
+                                    driverStatus = cart2Doc.getString("driverStatus") ?: "Available",
+                                    incomingUpdated = incomingUpdated,
+                                    incomingHeartbeat = cart2Doc.safeLong("lastHeartbeatMillis", cart2Doc.safeLong("last_seen", incomingUpdated)),
+                                    incomingLocationTs = incomingLocationTs,
+                                    direction = cart2Doc.getString("direction"),
+                                    currentStop = cart2Doc.getString("currentStop"),
+                                    nextStop = cart2Doc.getString("nextStop"),
+                                    localReceiptTime = System.currentTimeMillis()
+                                )
+                            }
                         }
                     } catch (e: Exception) {
                         Log.w("CampusRideRepo", "Refresh cart_2 fetch warning: ${e.message}")
@@ -2936,7 +2905,8 @@ class CampusRideRepository(context: Context) {
                                     isAvailable = if (isCurrentFresh) current.isAvailable else (c.isAvailable ?: current.isAvailable),
                                     lastUpdatedMillis = c.lastUpdatedMillis ?: current.lastUpdatedMillis,
                                     lastHeartbeatMillis = c.lastHeartbeatMillis ?: current.lastHeartbeatMillis,
-                                    locationTimestampMillis = c.locationTimestampMillis ?: current.locationTimestampMillis
+                                    locationTimestampMillis = c.locationTimestampMillis ?: current.locationTimestampMillis,
+                                    localReceiptTimestampMillis = System.currentTimeMillis()
                                 )
                             }
                         }
@@ -2992,4 +2962,134 @@ private fun com.google.firebase.firestore.DocumentSnapshot.safeInt(field: String
 
 private fun com.google.firebase.firestore.DocumentSnapshot.safeLong(field: String, default: Long = 0L): Long =
     (get(field) as? Number)?.toLong() ?: default
+
+/**
+ * Deterministic ingestion policy for incoming Firestore snapshots.
+ *
+ * Enforces:
+ * 1. Live server snapshots (isFromDiskCache == false) must NEVER be discarded due to client clock skew.
+ * 2. Cached snapshots (isFromDiskCache == true) must not regress state if live server data is active.
+ * 3. Physical GPS coordinates are preserved and decoupled from operational driver status strings.
+ */
+object FirestoreSnapshotIngestionPolicy {
+    fun shouldProcessSnapshot(
+        isFromDiskCache: Boolean,
+        hasLiveServerData: Boolean,
+        incomingBestTs: Long,
+        existingBestTs: Long
+    ): Boolean {
+        if (!isFromDiskCache) {
+            // Live server data is always processed in real time
+            return true
+        }
+        // If live server data has already been received, ignore disk cache replays
+        if (hasLiveServerData) {
+            return false
+        }
+        // Cached snapshot: ignore if it is older than current state
+        if (existingBestTs > 0L && incomingBestTs > 0L && incomingBestTs < existingBestTs) {
+            return false
+        }
+        return true
+    }
+
+    fun resolveEffectiveCartState(
+        existingCart: GolfCartState,
+        cartId: String,
+        cartName: String,
+        lat: Double?,
+        lng: Double?,
+        speedKmH: Int,
+        bearing: Float,
+        rawStatusStr: String?,
+        isAvailable: Boolean,
+        isTripActive: Boolean,
+        driverStatus: String,
+        incomingUpdated: Long,
+        incomingHeartbeat: Long,
+        incomingLocationTs: Long,
+        direction: String?,
+        currentStop: String?,
+        nextStop: String?,
+        localReceiptTime: Long = System.currentTimeMillis()
+    ): GolfCartState {
+        val hasIncomingCoords = (lat != null && lng != null && lat != 0.0 && lng != 0.0)
+
+        // Preserve latest valid physical coordinates
+        val effectiveLat = if (hasIncomingCoords) lat else existingCart.latitude
+        val effectiveLng = if (hasIncomingCoords) lng else existingCart.longitude
+        val hasEffectiveCoords = (effectiveLat != null && effectiveLng != null && effectiveLat != 0.0 && effectiveLng != 0.0)
+
+        // Physical Campus Presence:
+        // Evaluated strictly from coordinates when coordinates are present.
+        val isPhysicallyInside = if (hasEffectiveCoords) {
+            GeofenceManager.isInsideCampusGeofence(effectiveLat!!, effectiveLng!!)
+        } else {
+            !driverStatus.equals("Outside Campus", ignoreCase = true)
+        }
+        val isOutside = !isPhysicallyInside
+
+        var effectiveIsAvailable = isAvailable
+        var effectiveDriverStatus = driverStatus
+
+        var status = try {
+            if (rawStatusStr != null) GolfCartStatus.valueOf(rawStatusStr) else GolfCartStatus.HALTED
+        } catch (e: Exception) {
+            GolfCartStatus.HALTED
+        }
+
+        if (isOutside) {
+            effectiveIsAvailable = false
+            effectiveDriverStatus = "Driver Not Available"
+            status = GolfCartStatus.OFFLINE
+        } else if (hasEffectiveCoords && isPhysicallyInside) {
+            // Physical location is inside campus with valid coordinates:
+            // Do NOT turn valid coordinates into OFFLINE merely because of operational status
+            // ("Driver Not Available", "Lunch Break", "Off Duty").
+            // Physical motion status is MOVING or HALTED.
+            if (status == GolfCartStatus.OFFLINE && !driverStatus.equals("Offline", ignoreCase = true)) {
+                status = if (speedKmH > 0) GolfCartStatus.MOVING else GolfCartStatus.HALTED
+            } else if (speedKmH > 0) {
+                status = GolfCartStatus.MOVING
+            }
+        }
+
+        val lastUpdated = if (incomingUpdated > 0L) incomingUpdated else localReceiptTime
+        val lastHeartbeat = if (incomingHeartbeat > 0L) incomingHeartbeat else lastUpdated
+        val locationTimestamp = if (hasIncomingCoords) {
+            if (incomingLocationTs > 0L) incomingLocationTs else lastUpdated
+        } else {
+            existingCart.locationTimestampMillis
+        }
+
+        val currentDistGate = if (hasEffectiveCoords) {
+            GeofenceManager.calculateDistanceMeters(effectiveLat!!, effectiveLng!!, GeofenceManager.GATE_LAT, GeofenceManager.GATE_LNG).roundToInt()
+        } else {
+            existingCart.distanceToGateMeters ?: 0
+        }
+
+        return existingCart.copy(
+            cartId = cartId,
+            cartName = cartName,
+            latitude = effectiveLat,
+            longitude = effectiveLng,
+            speedKmH = speedKmH,
+            bearing = bearing,
+            status = status,
+            isTripActive = isTripActive,
+            isAvailable = effectiveIsAvailable,
+            driverStatus = effectiveDriverStatus,
+            lastUpdatedMillis = lastUpdated,
+            lastHeartbeatMillis = lastHeartbeat,
+            locationTimestampMillis = locationTimestamp,
+            localReceiptTimestampMillis = localReceiptTime,
+            distanceToGateMeters = currentDistGate,
+            distanceToUserMeters = currentDistGate,
+            direction = direction ?: existingCart.direction,
+            currentStop = currentStop ?: existingCart.currentStop,
+            nextStop = nextStop ?: existingCart.nextStop
+        )
+    }
+}
+
 

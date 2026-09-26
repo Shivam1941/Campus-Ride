@@ -3,6 +3,7 @@
   "description": "Firebase Cloud Functions for Campus Ride high-priority FCM notifications",
   "scripts": {
     "lint": "echo \"No lint configured\"",
+    "test": "node --test test/*.test.js",
     "start": "node server.js",
     "shell": "firebase functions:shell",
     "serve": "firebase serve --only functions",

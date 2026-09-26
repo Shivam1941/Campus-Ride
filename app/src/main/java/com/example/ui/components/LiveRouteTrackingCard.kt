@@ -41,6 +41,7 @@ import com.example.location.CampusLandmarkZone
 import com.example.location.CampusLandmarkZone.Companion.RoutePositionResult
 import com.example.location.CampusLandmarkZone.Companion.StopVisualState
 import com.example.location.CampusRouteGraph
+import com.example.location.RouteTrackingGatingPolicy
 import com.example.ui.theme.CampusTheme
 import java.util.Locale
 
@@ -96,10 +97,16 @@ fun LiveRouteTrackingCard(
 
     val isCartOutside = displayCart?.isOutsideCampus == true || displayCart?.isInsideCampus == false
     val isCartOnline = !isCartOutside && (displayCart?.isDriverOnline == true || isDriverAvailable)
-    val isCartOffline = isCartOutside || !isCartOnline || activePresence == com.example.data.model.CartPresenceState.OFFLINE
     val isLocationFresh = !isCartOutside && activePresence == com.example.data.model.CartPresenceState.ONLINE_LOCATION_AVAILABLE
     val isLocationStale = !isCartOutside && activePresence == com.example.data.model.CartPresenceState.ONLINE_LOCATION_STALE
     val isNoLocationYet = !isCartOutside && isCartOnline && activePresence == com.example.data.model.CartPresenceState.ONLINE_NO_LOCATION
+
+    // Route Progress Location Gating:
+    // Physical location and operational ride availability are separate concepts.
+    // If the cart has valid, non-expired physical coordinates inside campus, pass them to the route engine
+    // regardless of operational driverStatus ("Driver Not Available", "Lunch Break", "Off Duty").
+    val usableCoordinates = RouteTrackingGatingPolicy.extractUsableRouteCoordinates(displayCart)
+    val isRouteLocationActive = usableCoordinates != null
 
     val routeResult: RoutePositionResult? = remember(
         displayCart?.latitude,
@@ -107,19 +114,18 @@ fun LiveRouteTrackingCard(
         displayCart?.bearing,
         displayCart?.speedKmH,
         displayCart?.cartId,
-        isCartOutside,
-        isCartOnline
+        isRouteLocationActive
     ) {
-        if (!isCartOutside && isCartOnline && displayCart?.hasCoordinates == true && !displayCart.isLocationExpiredOrMissing) {
+        if (usableCoordinates != null) {
             CampusLandmarkZone.evaluateRoutePosition(
-                latitude = displayCart.latitude,
-                longitude = displayCart.longitude,
-                bearing = displayCart.bearing,
-                relativeMovement = displayCart.relativeMovement,
-                speedKmH = displayCart.speedKmH ?: 0,
-                accuracy = displayCart.accuracy ?: 0f,
-                timestamp = displayCart.locationTimestampMillis ?: displayCart.lastUpdatedMillis ?: System.currentTimeMillis(),
-                cartId = displayCart.cartId ?: "cart_1"
+                latitude = usableCoordinates.first,
+                longitude = usableCoordinates.second,
+                bearing = displayCart?.bearing,
+                relativeMovement = displayCart?.relativeMovement,
+                speedKmH = displayCart?.speedKmH ?: 0,
+                accuracy = displayCart?.accuracy ?: 0f,
+                timestamp = displayCart?.locationTimestampMillis ?: displayCart?.lastUpdatedMillis ?: System.currentTimeMillis(),
+                cartId = displayCart?.cartId ?: "cart_1"
             )
         } else null
     }
@@ -132,18 +138,16 @@ fun LiveRouteTrackingCard(
         displayCart?.bearing,
         displayCart?.relativeMovement,
         facultySelectedLocation,
-        isCartOffline,
-        isCartOutside,
-        isCartOnline
+        isRouteLocationActive
     ) {
         CampusRouteGraph.evaluateLiveProgress(
             cartId = displayCart?.cartId ?: selectedCartId,
-            latitude = if (!isCartOutside && !isCartOffline && displayCart?.hasCoordinates == true) displayCart.latitude else null,
-            longitude = if (!isCartOutside && !isCartOffline && displayCart?.hasCoordinates == true) displayCart.longitude else null,
+            latitude = usableCoordinates?.first,
+            longitude = usableCoordinates?.second,
             bearing = displayCart?.bearing,
             relativeMovement = displayCart?.relativeMovement,
             selectedDestination = facultySelectedLocation,
-            isOnline = !isCartOffline
+            isOnline = isRouteLocationActive
         )
     }
 
@@ -513,7 +517,7 @@ fun LiveRouteTrackingCard(
 
                 val statusText = when {
                     isCartOutside -> "Driver Not Available"
-                    isCartOffline -> "Offline"
+                    !liveRouteProgress.isLocationAvailable -> "Offline"
                     liveRouteProgress.isOffRoute -> "Off Route"
                     liveRouteProgress.currentStop != null -> "At ${liveRouteProgress.currentStop.displayName}"
                     liveRouteProgress.approachingStops.isNotEmpty() -> "En route to ${liveRouteProgress.approachingStops.first().node.displayName}"
@@ -521,7 +525,7 @@ fun LiveRouteTrackingCard(
                 }
                 val (pillBg, pillText) = when {
                     isCartOutside -> statusColors.dangerContainer to statusColors.onDangerContainer
-                    isCartOffline -> statusColors.neutralContainer to statusColors.onNeutralContainer
+                    !liveRouteProgress.isLocationAvailable -> statusColors.neutralContainer to statusColors.onNeutralContainer
                     liveRouteProgress.isOffRoute -> statusColors.warningContainer to statusColors.onWarningContainer
                     liveRouteProgress.currentStop != null -> statusColors.successContainer to statusColors.onSuccessContainer
                     else -> statusColors.infoContainer to statusColors.onInfoContainer

@@ -653,8 +653,7 @@ app.post('/api/rides/request', rateLimiter(20, 60000), async (req, res) => {
         fcmTokensStore.delete('DRIVER');
         fcmTokensStore.delete(targetDriverId);
         admin.firestore().collection('drivers').doc(effectiveCartId).update({
-          fcmToken: admin.firestore.FieldValue.delete(),
-          isAvailable: false
+          fcmToken: admin.firestore.FieldValue.delete()
         }).catch(_ => {});
       }
     }
@@ -1023,8 +1022,6 @@ app.post('/api/notifications/fcm-token', async (req, res) => {
         admin.firestore().collection('drivers').doc(assignedCart).set({
           fcmToken,
           cartId: assignedCart,
-          isOnline: true,
-          isAvailable: true,
           lastUpdatedMillis: Date.now()
         }, { merge: true }),
         admin.firestore().collection('fcm_tokens').doc(`driver_${assignedCart}`).set({
